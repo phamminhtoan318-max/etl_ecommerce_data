@@ -1,12 +1,5 @@
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.append(str(BASE_DIR))
-
 import pandas as pd
 from sqlalchemy import inspect, text
 from src.database import get_source_engine
@@ -39,11 +32,14 @@ def extract_table(logical_name, sql_table_name, engine, batch_time, batch_id, sc
 
     try:
         query = text(f"SELECT * FROM [{schema}].[{sql_table_name}] WITH (NOLOCK)")
+        chunks = []
         with engine.connect() as conn:
-            df = pd.read_sql(query, conn, chunksize=chunksize)
+            for chunk in pd.read_sql(query, conn, chunksize=chunksize):
+                chunk["_extracted_at"] = batch_time
+                chunk["_batch_id"] = batch_id
+                chunks.append(chunk)
 
-        df["_extracted_at"] = batch_time
-        df["_batch_id"] = batch_id
+        df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
         elapsed = time.time() - start_time
         logger.info(
@@ -98,6 +94,3 @@ def extract_from_sqlserver(schema="dbo", batch_time=None):
     finally:
         engine.dispose()
 
-
-if __name__ == "__main__":
-    extract_from_sqlserver()
