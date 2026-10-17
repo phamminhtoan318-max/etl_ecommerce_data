@@ -1,11 +1,15 @@
+from pathlib import Path
 import time
 from datetime import datetime, timezone
 import pandas as pd
 from sqlalchemy import inspect, text
+from src.config import BASE_DIR
 from src.database import get_source_engine
 from src.logger import get_logger
 
 logger = get_logger(__name__)
+
+QUERIES_DIR = BASE_DIR / "sql" / "source" / "queries"
 
 OLIST_7_TABLES = {
     "customers": ["customers", "olist_customers_dataset"],
@@ -28,10 +32,22 @@ def resolve_table_name(db_tables, candidates):
 
 def extract_table(logical_name, sql_table_name, engine, batch_time, batch_id, schema="dbo", chunksize = 50_000):
     start_time = time.time()
-    logger.info(f"[EXTRACT] Đang đọc bảng [{schema}].[{sql_table_name}] từ SQL Server...")
+    logger.info(f"[EXTRACT] Đang đọc bảng [{schema}].[{sql_table_name:<28}] từ SQL Server...")
 
     try:
-        query = text(f"SELECT * FROM [{schema}].[{sql_table_name}] WITH (NOLOCK)")
+        sql_file = QUERIES_DIR / f"{logical_name}.sql"
+        if sql_file.exists():
+            logger.info(f"[EXTRACT] Sử dụng query từ file: sql/source/queries/{sql_file.name}")
+            with open(sql_file, "r", encoding="utf-8") as f:
+                query_str = f.read()
+
+            query_str = query_str.replace(f"[dbo].[{logical_name}]", f"[{schema}].[{sql_table_name}]")
+            query_str = query_str.replace(f"[dbo].[olist_{logical_name}_dataset]", f"[{schema}].[{sql_table_name}]")
+            query = text(query_str)
+        else:
+            logger.warning(f"[EXTRACT] Không tìm thấy '{sql_file.name}', fallback về SELECT *")
+            query = text(f"SELECT * FROM [{schema}].[{sql_table_name}] WITH (NOLOCK)")
+
         chunks = []
         with engine.connect() as conn:
             for chunk in pd.read_sql(query, conn, chunksize=chunksize):
@@ -43,8 +59,8 @@ def extract_table(logical_name, sql_table_name, engine, batch_time, batch_id, sc
 
         elapsed = time.time() - start_time
         logger.info(
-            f"[EXTRACT] Thành công '{logical_name}': {len(df):,} dòng, "
-            f"{len(df.columns)} cột ({elapsed:.2f}s)"
+            f"[EXTRACT] Thành công '{logical_name:<14}': {len(df):>7,} dòng, "
+            f"{len(df.columns):>2} cột ({elapsed:>5.2f}s)"
         )
         return df
 
