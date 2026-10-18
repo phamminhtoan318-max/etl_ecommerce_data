@@ -1,0 +1,72 @@
+customers:
+  strategy: full
+  candidates:
+    - customers
+    - olist_customers_dataset
+  primary_keys:
+    - customer_id
+  chunksize: 50000
+
+orders:
+  strategy: watermark
+  candidates:
+    - orders
+    - olist_orders_dataset
+  primary_keys:
+    - order_id
+  watermark_column: order_purchase_timestamp
+  default_start_watermark: "2016-01-01 00:00:00"
+  chunksize: 25000
+
+order_reviews:
+  strategy: lookback_window
+  candidates:
+    - order_reviews
+    - olist_order_reviews_dataset
+  primary_keys:
+    - review_id
+    - order_id
+  watermark_column: review_creation_date
+  lookback_days: 3
+  default_start_watermark: "2016-01-01 00:00:00"
+  chunksize: 25000
+
+order_payments:
+  strategy: full
+  candidates:
+    - order_payments
+    - olist_order_payments_dataset
+  primary_keys:
+    - order_id
+    - payment_sequential
+  start_date: "2017-01-01"
+  end_date: "2017-07-01"
+  chunksize: 50000
+
+order_items:
+  strategy: full
+  candidates:
+    - order_items
+    - olist_order_items_dataset
+  primary_keys:
+    - order_id
+    - order_item_id
+  chunksize: 50000
+
+products:
+  strategy: full
+  candidates:
+    - products
+    - olist_products_dataset
+  primary_keys:
+    - product_id
+  chunksize: 50000
+
+sellers:
+  strategy: full
+  candidates:
+    - sellers
+    - olist_sellers_dataset
+  primary_keys:
+    - seller_id
+  chunksize: 50000
