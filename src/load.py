@@ -1,132 +1,80 @@
-import gc
-from pathlib import Path
+import io
+import csv
 import time
 from datetime import datetime, timezone
 import pandas as pd
-from sqlalchemy import inspect, text
-from src.config import BASE_DIR
-from src.database import get_source_engine, get_target_engine
-from src.extract import OLIST_7_TABLES, resolve_table_name
+from sqlalchemy import text
+from src.database import get_target_engine
+from src.extract import extract_from_sqlserver
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-QUERIES_DIR = BASE_DIR / "sql" / "source" / "queries"
+
+def _psql_copy_method(table, conn, keys, data_iter):
+    dbapi_conn = conn.connection
+    with dbapi_conn.cursor() as cur:
+        s_buf = io.StringIO()
+        writer = csv.writer(s_buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        writer.writerows(data_iter)
+        s_buf.seek(0)
+
+        tbl = f'"{table.schema}"."{table.name}"' if table.schema else f'"{table.name}"'
+        cols = ", ".join(f'"{k}"' for k in keys)
+        copy_sql = f"COPY {tbl} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '')"
+        cur.copy_expert(sql=copy_sql, file=s_buf)
+        s_buf.close()
 
 
-def stream_extract_and_load_table(
-    logical_name,
-    sql_table_name,
-    src_engine,
-    tgt_engine,
-    batch_time,
-    batch_id,
-    src_schema="dbo",
-    tgt_schema="stg",
-    chunksize=25_000,
-):
-    start_time = time.time()
-    logger.info(f"[STREAM LOAD] Bắt đầu stream [{src_schema}].[{sql_table_name:<28}] -> Postgres [{tgt_schema}].[{sql_table_name:<28}]...")
-
-    sql_file = QUERIES_DIR / f"{logical_name}.sql"
-    if sql_file.exists():
-        with open(sql_file, "r", encoding="utf-8") as f:
-            query_str = f.read()
-        query_str = query_str.replace(f"[dbo].[{logical_name}]", f"[{src_schema}].[{sql_table_name}]")
-        query_str = query_str.replace(f"[dbo].[olist_{logical_name}_dataset]", f"[{src_schema}].[{sql_table_name}]")
-        query = text(query_str)
-    else:
-        query = text(f"SELECT * FROM [{src_schema}].[{sql_table_name}] WITH (NOLOCK)")
-
-    with tgt_engine.begin() as tgt_conn:
-        tgt_conn.execute(text(f"TRUNCATE TABLE {tgt_schema}.{sql_table_name};"))
-
+def stream_load_table_to_postgres(chunk_stream, table_name, strategy, tgt_engine, tgt_schema="stg"):
     total_rows = 0
-    col_count = 0
+    batch_idx = 0
 
-    with src_engine.connect() as src_conn, tgt_engine.connect() as tgt_conn:
-        for chunk in pd.read_sql(query, src_conn, chunksize=chunksize):
-            chunk["_extracted_at"] = batch_time
-            chunk["_batch_id"] = batch_id
+    with tgt_engine.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{tgt_schema}";'))
 
-            col_count = len(chunk.columns)
-            chunk_len = len(chunk)
+    with tgt_engine.begin() as conn:
+        for chunk in chunk_stream:
+            batch_idx += 1
+            if batch_idx == 1:
+                if strategy == "full":
+                    chunk.head(0).to_sql(
+                        name=table_name,
+                        con=conn,
+                        schema=tgt_schema,
+                        if_exists="replace",
+                        index=False,
+                    )
 
             chunk.to_sql(
-                name=sql_table_name,
-                con=tgt_conn,
+                name=table_name,
+                con=conn,
                 schema=tgt_schema,
                 if_exists="append",
                 index=False,
-                method="multi",
-                chunksize=2_000,
+                method=_psql_copy_method,
             )
+            total_rows += len(chunk)
 
-            total_rows += chunk_len
-            del chunk
-            gc.collect()
-
-    elapsed = time.time() - start_time
-    logger.info(
-        f"[STREAM LOAD] Hoàn tất nạp [{tgt_schema}].[{sql_table_name:<28}]: "
-        f"{total_rows:>7,} dòng, {col_count:>2} cột ({elapsed:>5.2f}s) - RAM giải phóng 100%"
-    )
-
-    return {
-        "logical_name": logical_name,
-        "table_name": sql_table_name,
-        "loaded_rows": total_rows,
-        "loaded_cols": col_count,
-        "elapsed": elapsed,
-    }
+    return total_rows
 
 
-def stream_load_all_to_staging(
-    batch_time=None,
-    src_schema="dbo",
-    tgt_schema="stg",
-    chunksize=25_000,
-):
-    total_start = time.time()
-
-    if batch_time is None:
-        batch_time = datetime.now(timezone.utc)
-    batch_id = batch_time.strftime("%Y%m%d_%H%M%S")
-
-    logger.info(f"=== BẮT ĐẦU STREAM EXTRACT & LOAD VÀO POSTGRES STAGING (BATCH: {batch_id}) ===")
-
-    src_engine = get_source_engine()
+def run_pipeline():
+    batch_time = datetime.now(timezone.utc)
     tgt_engine = get_target_engine()
+    watermark_states = {}
 
-    load_summary = {}
+    for logical_name, actual_name, rule, chunk_stream in extract_from_sqlserver(
+        batch_time=batch_time, watermark_states=watermark_states
+    ):
+        logger.info(f"[PIPELINE] Bắt đầu nạp {logical_name} -> stg.{actual_name}")
+        loaded_rows = stream_load_table_to_postgres(
+            chunk_stream=chunk_stream,
+            table_name=actual_name,
+            strategy=rule.get("strategy", "full"),
+            tgt_engine=tgt_engine,
+            tgt_schema="stg",
+        )
+        logger.info(f"[PIPELINE] Đã nạp thành công {loaded_rows:,} dòng vào stg.{actual_name}")
 
-    try:
-        inspector = inspect(src_engine)
-        existing_tables = set(inspector.get_table_names(schema=src_schema))
-
-        for logical_name, candidates in OLIST_7_TABLES.items():
-            actual_name = resolve_table_name(existing_tables, candidates)
-            if not actual_name:
-                raise ValueError(f"Không tìm thấy bảng '{logical_name}' trên SQL Server nguồn!")
-
-            stats = stream_extract_and_load_table(
-                logical_name=logical_name,
-                sql_table_name=actual_name,
-                src_engine=src_engine,
-                tgt_engine=tgt_engine,
-                batch_time=batch_time,
-                batch_id=batch_id,
-                src_schema=src_schema,
-                tgt_schema=tgt_schema,
-                chunksize=chunksize,
-            )
-            load_summary[logical_name] = stats
-
-        total_elapsed = time.time() - total_start
-        logger.info(f"=== HOÀN TẤT NẠP 7 BẢNG VÀO STAGING POSTGRES TRONG {total_elapsed:.2f}s ===")
-        return load_summary
-
-    finally:
-        src_engine.dispose()
-        tgt_engine.dispose()
-
+    tgt_engine.dispose()

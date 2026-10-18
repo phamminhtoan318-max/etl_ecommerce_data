@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 from sqlalchemy import inspect, text
-from src.config import BASE_DIR
+from src.config.config import BASE_DIR, VALIDATE_SQL_PATH
 from src.database import get_source_engine, get_target_engine
 from src.extract import OLIST_7_TABLES, resolve_table_name
 from src.logger import get_logger
@@ -33,7 +33,6 @@ DATE_COLUMNS = {
     "order_reviews": "review_creation_date",
 }
 
-VALIDATE_SQL_PATH = BASE_DIR / "sql" / "source" / "validate_source.sql"
 
 
 def measure_source_baseline(schema="dbo", engine=None):
