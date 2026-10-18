@@ -1,5 +1,4 @@
 services:
-  # 1. Target Data Warehouse: PostgreSQL Database
   postgres_dwh:
     image: postgres:16
     container_name: olist_postgres_dwh
