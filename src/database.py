@@ -1,6 +1,6 @@
 from functools import lru_cache
 from sqlalchemy import create_engine, text
-from src.config import SRC_SQLALCHEMY_URI, TGT_SQLALCHEMY_URI
+from src.config.config import SRC_SQLALCHEMY_URI, TGT_SQLALCHEMY_URI
 from src.logger import get_logger
 
 logger = get_logger(__name__)
