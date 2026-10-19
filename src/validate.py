@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 from sqlalchemy import inspect, text
-from src.config.config import BASE_DIR, VALIDATE_SQL_PATH
+from src.config.config import BASE_DIR, EXTRACT_PIPELINE_RULES, VALIDATE_SQL_PATH_SOURCE, VALIDATE_SQL_PATH_STAGING
 from src.database import get_source_engine, get_target_engine
 from src.extract import OLIST_7_TABLES, resolve_table_name
 from src.logger import get_logger
@@ -36,14 +36,15 @@ DATE_COLUMNS = {
 
 
 def measure_source_baseline(schema="dbo", engine=None):
-    logger.info("=== [CƠ CHẾ 1 - PRE-EXTRACT] BẮT ĐẦU ĐO ĐẠC THÔNG SỐ CHUẨN TỪ SQL SERVER ===")
+    logger.info("=== [CƠ CHẾ 1 - PRE-EXTRACT] BẮT ĐẦU ĐO ĐẠC THÔNG SỐ CHUẨN TỪ SOURCE ===")
     engine = engine or get_source_engine()
 
-    if not VALIDATE_SQL_PATH.exists():
-        raise FileNotFoundError(f"Không tìm thấy file SQL chuẩn: {VALIDATE_SQL_PATH}")
+    if not VALIDATE_SQL_PATH_SOURCE.exists():
+        raise FileNotFoundError(f"Không tìm thấy file SQL chuẩn: {VALIDATE_SQL_PATH_SOURCE}")
 
-    content = VALIDATE_SQL_PATH.read_text(encoding="utf-8")
-    statements = [s.strip() for s in content.split(";") if s.strip()]
+    content = VALIDATE_SQL_PATH_SOURCE.read_text(encoding="utf-8")
+    lines = [line for line in content.splitlines() if not line.strip().startswith("--")]
+    statements = [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
 
     source_baseline = {}
     with engine.connect() as conn:
@@ -65,7 +66,7 @@ def measure_source_baseline(schema="dbo", engine=None):
         if pk_issues:
             logger.warning(f"[BASELINE WARNING] Phát hiện {len(pk_issues)} cảnh báo khóa chính tại nguồn: {pk_issues}")
         else:
-            logger.info("[BASELINE] SQL Server: 0 lỗi Khóa chính (NULL & Duplicate đều bằng 0)")
+            logger.info("[BASELINE] Source: 0 lỗi Khóa chính (NULL & Duplicate đều bằng 0)")
 
         date_ranges = {}
         if len(statements) >= 3:
@@ -90,18 +91,30 @@ def measure_source_baseline(schema="dbo", engine=None):
             source_cols = [c["name"] for c in inspector.get_columns(actual_name, schema=schema)]
             expected_row_count = row_counts.get(actual_name, 0)
 
+            rule = EXTRACT_PIPELINE_RULES.get(logical_name, {})
+            configured_cols = rule.get("columns", "*")
+            if configured_cols == "*" or not configured_cols:
+                expected_columns = list(source_cols)
+            elif isinstance(configured_cols, list):
+                expected_columns = list(configured_cols)
+            else:
+                expected_columns = list(source_cols)
+
+            expected_col_count = len(expected_columns) + 2
+
             source_baseline[logical_name] = {
                 "actual_table_name": actual_name,
                 "source_row_count": expected_row_count,
                 "source_columns": source_cols,
+                "expected_columns": expected_columns,
                 "source_col_count": len(source_cols),
-                "expected_col_count": len(source_cols) + 2,
+                "expected_col_count": expected_col_count,
                 "date_range": date_ranges.get(actual_name),
             }
 
             logger.info(
                 f"[BASELINE] Bảng '{logical_name:<14}' ({actual_name:<28}): "
-                f"{expected_row_count:>7,} dòng | {len(source_cols):>2} cột gốc -> kỳ vọng {len(source_cols)+2:>2} cột DataFrame"
+                f"{expected_row_count:>7,} dòng | {len(expected_columns):>2} cột cấu hình -> kỳ vọng {expected_col_count:>2} cột DataFrame"
             )
 
     logger.info("=== [CƠ CHẾ 1 - PRE-EXTRACT] ĐÃ LƯU THÀNH CÔNG THÔNG SỐ BASELINE VÀO BỘ NHỚ ===")
@@ -173,9 +186,10 @@ def reconcile_dimensions_with_baseline(raw_tables, source_baseline, errors):
             logger.info(f"[VALIDATE PYTHON] Bảng '{logical_name:<14}': Đủ {actual_cols:>2}/{expected_cols:>2} cột")
 
         df_col_set = set(df.columns)
-        missing_source_cols = [c for c in baseline_info["source_columns"] if c not in df_col_set]
-        if missing_source_cols:
-            err = f"[THIẾU CỘT] Bảng '{logical_name}' bị thiếu các cột gốc: {missing_source_cols}"
+        expected_columns = baseline_info.get("expected_columns", baseline_info["source_columns"])
+        missing_configured_cols = [c for c in expected_columns if c not in df_col_set]
+        if missing_configured_cols:
+            err = f"[THIẾU CỘT CẤU HÌNH] Bảng '{logical_name}' bị thiếu các cột theo cấu hình: {missing_configured_cols}"
             errors.append(err)
             logger.error(err)
             is_valid = False
@@ -197,6 +211,14 @@ def check_primary_keys_in_memory(raw_tables, errors):
     for table_name, pk_cols in PRIMARY_KEYS.items():
         df = raw_tables.get(table_name)
         if df is None or df.empty:
+            continue
+
+        missing_pks = [pk for pk in pk_cols if pk not in df.columns]
+        if missing_pks:
+            err = f"[LỖI THIẾU PK] Bảng '{table_name}': Cột khóa chính {missing_pks} không có trong DataFrame trích xuất!"
+            errors.append(err)
+            logger.error(err)
+            is_valid = False
             continue
 
         null_count = df[pk_cols].isnull().any(axis=1).sum()
@@ -278,36 +300,57 @@ def validate_extracted_data(raw_tables, source_baseline=None, schema="dbo", engi
 
     if not all_passed:
         summary_err = (
-            f"\n❌ [DỪNG PIPELINE NGAY LẬP TỨC] Phát hiện {len(errors)} sai lệch giữa SQL Server và Extract:\n"
+            f"\n❌ [DỪNG PIPELINE NGAY LẬP TỨC] Phát hiện {len(errors)} sai lệch giữa Source và Extract:\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
         logger.error(summary_err)
         raise ValueError(summary_err)
 
     logger.info(
-        "=== ✅ [VALIDATE THÀNH CÔNG 100%] DỮ LIỆU KHỚP TUYỆT ĐỐI VỚI SQL SERVER! SẴN SÀNG CHO BƯỚC TIẾP THEO ==="
+        "=== ✅ [VALIDATE THÀNH CÔNG 100%] DỮ LIỆU KHỚP TUYỆT ĐỐI VỚI SOURCE! SẴN SÀNG CHO BƯỚC TIẾP THEO ==="
     )
     return True
 
 
 def validate_staging_against_baseline(source_baseline, tgt_schema="stg", tgt_engine=None):
-    logger.info("=== [VALIDATE STAGING] BẮT ĐẦU ĐỐI CHIẾU DỮ LIỆU TẦNG STAGING POSTGRESQL VỚI BASELINE ===")
+    logger.info("=== [VALIDATE STAGING] BẮT ĐẦU ĐỐI CHIẾU DỮ LIỆU TẦNG STAGING VỚI BASELINE ===")
     tgt_engine = tgt_engine or get_target_engine()
     errors = []
 
+    if not VALIDATE_SQL_PATH_STAGING.exists():
+        raise FileNotFoundError(f"Không tìm thấy file SQL kiểm định Staging: {VALIDATE_SQL_PATH_STAGING}")
+
+    stg_row_counts = {}
     with tgt_engine.connect() as conn:
+        content = VALIDATE_SQL_PATH_STAGING.read_text(encoding="utf-8")
+        lines = [line for line in content.splitlines() if not line.strip().startswith("--")]
+        clean_statements = [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
+
+        for stmt in clean_statements:
+            if not stmt:
+                continue
+            res = conn.execute(text(stmt)).fetchall()
+            for r in res:
+                mapping = dict(r._mapping)
+                tbl = mapping.get("table_name", "")
+                clean_tbl = tbl.split(".")[-1]
+                stg_row_counts[clean_tbl] = mapping.get("total_rows", 0)
+
         for logical_name, base_info in source_baseline.items():
             tbl_name = base_info["actual_table_name"]
             expected_rows = base_info["source_row_count"]
             expected_cols = base_info["expected_col_count"]
 
-            stg_rows = conn.execute(text(f"SELECT COUNT(*) FROM {tgt_schema}.{tbl_name};")).scalar()
+            if tbl_name in stg_row_counts:
+                stg_rows = stg_row_counts[tbl_name]
+            else:
+                stg_rows = conn.execute(text(f'SELECT COUNT(*) FROM "{tgt_schema}"."{tbl_name}";')).scalar()
 
             if stg_rows != expected_rows:
                 diff = abs(stg_rows - expected_rows)
                 err = (
-                    f"[LỆCH SỐ DÒNG STAGING] Bảng '{logical_name}': SQL Server nguồn có {expected_rows:,} dòng "
-                    f"nhưng Staging Postgres có {stg_rows:,} dòng (lệch {diff:,} dòng)!"
+                    f"[LỆCH SỐ DÒNG STAGING] Bảng '{logical_name}': Source nguồn có {expected_rows:,} dòng "
+                    f"nhưng Staging Target có {stg_rows:,} dòng (lệch {diff:,} dòng)!"
                 )
                 errors.append(err)
                 logger.error(err)
@@ -316,12 +359,12 @@ def validate_staging_against_baseline(source_baseline, tgt_schema="stg", tgt_eng
 
     if errors:
         summary_err = (
-            f"\n❌ [DỪNG PIPELINE] Phát hiện {len(errors)} sai lệch giữa SQL Server và Staging Postgres:\n"
+            f"\n❌ [DỪNG PIPELINE] Phát hiện {len(errors)} sai lệch giữa Source và Staging:\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
         logger.error(summary_err)
         raise ValueError(summary_err)
 
-    logger.info("=== ✅ [ĐỐI CHIẾU STAGING THÀNH CÔNG 100%] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀO POSTGRESQL! ===")
+    logger.info("=== ✅ [ĐỐI CHIẾU STAGING THÀNH CÔNG 100%] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀO TARGET! ===")
     return True
 
