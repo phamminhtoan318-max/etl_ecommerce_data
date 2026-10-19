@@ -9,8 +9,8 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 
 OUTPUT_DIR = BASE_DIR / "output"
 LOGS_DIR = BASE_DIR / "logs"
-QUERIES_DIR = BASE_DIR / "sql" / "queries"
-VALIDATE_SQL_PATH = BASE_DIR / "sql" / "validate_source.sql"
+VALIDATE_SQL_PATH_SOURCE = BASE_DIR / "sql" / "source" / "validate_source.sql"
+VALIDATE_SQL_PATH_STAGING = BASE_DIR / "sql" / "staging" / "validate_staging.sql" 
 
 for directory in [OUTPUT_DIR, LOGS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
