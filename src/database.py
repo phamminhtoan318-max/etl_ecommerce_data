@@ -25,11 +25,11 @@ def test_connections():
     try:
         with get_source_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
-        logger.info("Kết nối Source Database (SQL Server) thành công!")
+        logger.info("Kết nối Source Database thành công!")
 
         with get_target_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
-        logger.info("Kết nối Target Database (PostgreSQL DWH) thành công!")
+        logger.info("Kết nối Target Database thành công!")
         
         return True
     except Exception as exc:
