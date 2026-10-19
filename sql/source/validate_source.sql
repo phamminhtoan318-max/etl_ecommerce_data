@@ -1,3 +1,4 @@
+-- Active: 1792219119102@@127.0.0.1@1433@E_commerce
 SELECT 'olist_customers_dataset' AS [table_name], COUNT(*) AS [total_rows] FROM [dbo].[olist_customers_dataset] WITH (NOLOCK)
 UNION ALL
 SELECT 'olist_orders_dataset', COUNT(*) FROM [dbo].[olist_orders_dataset] WITH (NOLOCK)
@@ -11,7 +12,7 @@ UNION ALL
 SELECT 'olist_products_dataset', COUNT(*) FROM [dbo].[olist_products_dataset] WITH (NOLOCK)
 UNION ALL
 SELECT 'olist_sellers_dataset', COUNT(*) FROM [dbo].[olist_sellers_dataset] WITH (NOLOCK);
-
+   
 SELECT 'customers - null PK' AS [check_type], COUNT(*) AS [issue_count] 
 FROM [dbo].[olist_customers_dataset] WITH (NOLOCK) WHERE [customer_id] IS NULL
 UNION ALL
