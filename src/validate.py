@@ -9,30 +9,22 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 REQUIRED_TABLES = [
-    "customers",
-    "orders",
-    "order_items",
-    "order_payments",
-    "order_reviews",
-    "products",
-    "sellers",
+    k
+    for k, v in EXTRACT_PIPELINE_RULES.items()
+    if str(v.get("strategy", "")).lower().strip() != "cancel"
 ]
 
 PRIMARY_KEYS = {
-    "customers": ["customer_id"],
-    "orders": ["order_id"],
-    "products": ["product_id"],
-    "sellers": ["seller_id"],
-    "order_items": ["order_id", "order_item_id"],
-    "order_payments": ["order_id", "payment_sequential"],
-    "order_reviews": ["review_id", "order_id"],
+    k: v.get("primary_keys", [])
+    for k, v in EXTRACT_PIPELINE_RULES.items()
+    if v.get("primary_keys")
 }
 
 DATE_COLUMNS = {
-    "orders": "order_purchase_timestamp",
-    "order_reviews": "review_creation_date",
+    k: v.get("watermark_column")
+    for k, v in EXTRACT_PIPELINE_RULES.items()
+    if v.get("watermark_column")
 }
-
 
 
 def measure_source_baseline(schema="dbo", engine=None):
@@ -84,14 +76,23 @@ def measure_source_baseline(schema="dbo", engine=None):
         existing_tables = set(inspector.get_table_names(schema=schema))
 
         for logical_name, candidates in OLIST_7_TABLES.items():
+            rule = EXTRACT_PIPELINE_RULES.get(logical_name, {})
+            strategy = str(rule.get("strategy", "full")).lower().strip()
+            if strategy == "cancel":
+                logger.warning(f"[BASELINE SKIP] Bảng '{logical_name}' có strategy='cancel' -> Bỏ qua đo baseline.")
+                continue
+
             actual_name = resolve_table_name(existing_tables, candidates)
             if not actual_name:
                 raise ValueError(f"Không tìm thấy bảng '{logical_name}' trên SQL Server!")
 
             source_cols = [c["name"] for c in inspector.get_columns(actual_name, schema=schema)]
-            expected_row_count = row_counts.get(actual_name, 0)
+            expected_row_count = row_counts.get(actual_name)
+            if expected_row_count is None:
+                expected_row_count = conn.execute(
+                    text(f"SELECT COUNT(*) FROM [{schema}].[{actual_name}] WITH (NOLOCK)")
+                ).scalar()
 
-            rule = EXTRACT_PIPELINE_RULES.get(logical_name, {})
             configured_cols = rule.get("columns", "*")
             if configured_cols == "*" or not configured_cols:
                 expected_columns = list(source_cols)
@@ -104,6 +105,8 @@ def measure_source_baseline(schema="dbo", engine=None):
 
             source_baseline[logical_name] = {
                 "actual_table_name": actual_name,
+                "target_table_name": rule.get("target_table") or actual_name,
+                "strategy": strategy,
                 "source_row_count": expected_row_count,
                 "source_columns": source_cols,
                 "expected_columns": expected_columns,
@@ -129,7 +132,7 @@ def check_table_completeness(raw_tables, errors):
         logger.error(err)
         return False
 
-    logger.info(f"[VALIDATE PYTHON] Đủ 7/7 bảng: {REQUIRED_TABLES}")
+    logger.info(f"[VALIDATE PYTHON] Đủ {len(REQUIRED_TABLES)}/{len(REQUIRED_TABLES)} bảng: {REQUIRED_TABLES}")
     return True
 
 
@@ -337,16 +340,19 @@ def validate_staging_against_baseline(source_baseline, tgt_schema="stg", tgt_eng
                 stg_row_counts[clean_tbl] = mapping.get("total_rows", 0)
 
         for logical_name, base_info in source_baseline.items():
-            tbl_name = base_info["actual_table_name"]
+            strategy = base_info.get("strategy", "full")
+            if strategy == "cancel":
+                continue
+
+            tbl_name = base_info.get("target_table_name") or base_info["actual_table_name"]
             expected_rows = base_info["source_row_count"]
-            expected_cols = base_info["expected_col_count"]
 
             if tbl_name in stg_row_counts:
                 stg_rows = stg_row_counts[tbl_name]
             else:
                 stg_rows = conn.execute(text(f'SELECT COUNT(*) FROM "{tgt_schema}"."{tbl_name}";')).scalar()
 
-            if stg_rows != expected_rows:
+            if strategy == "full" and stg_rows != expected_rows:
                 diff = abs(stg_rows - expected_rows)
                 err = (
                     f"[LỆCH SỐ DÒNG STAGING] Bảng '{logical_name}': Source nguồn có {expected_rows:,} dòng "
@@ -367,4 +373,3 @@ def validate_staging_against_baseline(source_baseline, tgt_schema="stg", tgt_eng
 
     logger.info("=== ✅ [ĐỐI CHIẾU STAGING THÀNH CÔNG 100%] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀO TARGET! ===")
     return True
-
