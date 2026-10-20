@@ -1,95 +1,10 @@
-# ==================================================================================================
-#                     HƯỚNG DẪN CẤU HÌNH PIPELINE TRÍCH XUẤT DỮ LIỆU TỪ A - Z
-# ==================================================================================================
-# File này quản lý tập trung toàn bộ cấu hình trích xuất (Extract) từ Source (SQL Server) sang Target (Postgres).
-# Mọi thiết lập về chế độ tải, chọn cột, khóa chính, kích thước phân trang đều nằm tại đây.
-#
-# --------------------------------------------------------------------------------------------------
-# I. DANH SÁCH CÁC THÀNH PHẦN VÀ CÁCH ĐIỀN (COMPONENTS A - Z):
-# --------------------------------------------------------------------------------------------------
-#
-# 1. strategy (Bắt buộc) - Chiến lược trích xuất bảng:
-#    - "full": 
-#        + Ý nghĩa: Kéo toàn bộ bảng từ nguồn.
-#        + SQL sinh ra: SELECT ... FROM [dbo].[table] WITH (NOLOCK) (không có WHERE).
-#        + Tác động Staging: Ghi đè hoàn toàn (replace) bảng cũ trên Postgres. An toàn, không bị trùng lặp.
-#    - "watermark":
-#        + Ý nghĩa: Kéo tăng dần (Incremental) theo mốc thời gian lớn hơn lần chạy trước.
-#        + SQL sinh ra: ... WHERE watermark_column > 'mốc_thời_gian'.
-#        + Tác động Staging: Nạp nối tiếp (append). Tiết kiệm băng thông, tốc độ cực nhanh.
-#    - "lookback_window":
-#        + Ý nghĩa: Kéo tăng dần nhưng tự động lùi lại N ngày để tránh sót dữ liệu cập nhật muộn (Late-arriving data).
-#        + SQL sinh ra: ... WHERE watermark_column > '(mốc_thời_gian - N ngày)'.
-#        + Tác động Staging: Nạp nối tiếp (append). Rất thích hợp cho bảng reviews/payments.
-#    - "date_range":
-#        + Ý nghĩa: Kéo dữ liệu trong một khoảng ngày cố định (thường dùng để cào lại lịch sử / Backfill).
-#        + SQL sinh ra: ... WHERE watermark_column >= 'start_date' AND watermark_column < 'end_date'.
-#        + Tác động Staging: Nạp nối tiếp (append).
-#    - "cancel":
-#        + Ý nghĩa: Hủy / Bỏ qua bảng này, pipeline sẽ không chạy query và không nạp gì vào Postgres.
-#        + Các bảng khác trong file cấu hình vẫn chạy bình thường.
-#
-# 2. candidates (Bắt buộc) - Tên bảng ứng viên trên CSDL nguồn:
-#    - Cách điền: Danh sách các tên bảng có thể có, sắp xếp theo thứ tự ưu tiên.
-#    - Ví dụ:
-#        candidates:
-#          - olist_orders_dataset   (Ưu tiên tìm tên này trước)
-#          - orders                 (Nếu không có tên trên thì tìm tên này)
-#    - Cơ chế: Hệ thống tự động so khớp không phân biệt chữ hoa/chữ thường (case-insensitive).
-#
-# 3. primary_keys (Bắt buộc) - Khóa chính của bảng:
-#    - Cách điền: Danh sách các cột định danh duy nhất của dòng dữ liệu.
-#    - Ví dụ khóa đơn:
-#        primary_keys:
-#          - customer_id
-#    - Ví dụ khóa tổ hợp (composite key):
-#        primary_keys:
-#          - order_id
-#          - order_item_id
-#    - Tác dụng: Phục vụ tầng kiểm định (validate.py) tự động đối soát: bắt lỗi NULL và lỗi Duplicate.
-#
-# 4. columns (Bắt buộc) - Danh sách các cột cần trích xuất:
-#    - Cách 1 - Lấy tất cả cột:
-#        columns: "*"
-#    - Cách 2 - Chỉ lấy một số cột cố định (tối ưu dung lượng đĩa và RAM):
-#        columns:
-#          - order_id
-#          - customer_id
-#          - order_status
-#    - LƯU Ý QUAN TRỌNG: Nếu chọn lọc cột, BẮT BUỘC phải bao gồm các cột trong 'primary_keys' và
-#      cột 'watermark_column' (nếu dùng cơ chế tăng dần), nếu không hệ thống sẽ báo lỗi và dừng bảng đó.
-#
-# 5. chunksize (Bắt buộc) - Kích thước phân trang khi đọc từ CSDL:
-#    - Cách điền: Số nguyên dương đại diện cho số dòng đọc mỗi lần (ví dụ: 25000, 50000).
-#    - Tác dụng: Chống tràn bộ nhớ RAM (OOM) khi bảng có hàng triệu dòng dữ liệu.
-#
-# 6. watermark_column (Bắt buộc nếu strategy là "watermark", "lookback_window", "date_range"):
-#    - Cách điền: Tên cột lưu mốc thời gian để lọc dữ liệu (ví dụ: order_purchase_timestamp, review_creation_date).
-#
-# 7. default_start_watermark (Bắt buộc nếu strategy là "watermark", "lookback_window"):
-#    - Cách điền: Mốc ngày giờ bắt đầu chạy lần đầu tiên, định dạng chuẩn ISO: "YYYY-MM-DD HH:MM:SS".
-#    - Ví dụ: "2016-01-01 00:00:00"
-#
-# 8. lookback_days (Bắt buộc nếu strategy là "lookback_window"):
-#    - Cách điền: Số ngày muốn quét lùi lại (ví dụ: 3 nghĩa là lùi 3 ngày).
-#
-# 9. start_date & end_date (Bắt buộc nếu strategy là "date_range"):
-#    - Cách điền: Mốc ngày bắt đầu và kết thúc, định dạng: "YYYY-MM-DD".
-#    - Ví dụ: start_date: "2017-01-01", end_date: "2017-07-01".
-#
-# --------------------------------------------------------------------------------------------------
-# II. NGUYÊN TẮC FAIL-FAST & CÁCH LY LỖI:
-# --------------------------------------------------------------------------------------------------
-# - Nếu bạn điền thiếu bất kỳ trường bắt buộc nào (ví dụ: chọn watermark mà quên watermark_column):
-#   Hệ thống sẽ ghi log ERROR màu đỏ chi tiết và lập tức HỦY (CANCEL) việc trích xuất bảng đó.
-# - Việc hủy bảng lỗi này diễn ra độc lập: Các bảng khác cấu hình đúng vẫn tiếp tục chạy bình thường!
-# ==================================================================================================
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 1: CUSTOMERS (Khách hàng)
 # --------------------------------------------------------------------------------------------------
 customers:
   strategy: full
+  target_table: olist_customers_dataset
   candidates:
     - olist_customers_dataset
     - customers
@@ -103,6 +18,7 @@ customers:
 # --------------------------------------------------------------------------------------------------
 orders:
   strategy: full
+  target_table: olist_orders_dataset
   candidates:
     - olist_orders_dataset
     - orders
@@ -118,6 +34,7 @@ orders:
 # --------------------------------------------------------------------------------------------------
 order_reviews:
   strategy: full
+  target_table: olist_order_reviews_dataset
   candidates:
     - olist_order_reviews_dataset
     - order_reviews
@@ -135,6 +52,7 @@ order_reviews:
 # --------------------------------------------------------------------------------------------------
 order_payments:
   strategy: full
+  target_table: olist_order_payments_dataset
   candidates:
     - olist_order_payments_dataset
     - order_payments
@@ -151,6 +69,7 @@ order_payments:
 # --------------------------------------------------------------------------------------------------
 order_items:
   strategy: full
+  target_table: olist_order_items_dataset
   candidates:
     - olist_order_items_dataset
     - order_items
@@ -165,6 +84,7 @@ order_items:
 # --------------------------------------------------------------------------------------------------
 products:
   strategy: full
+  target_table: olist_products_dataset
   candidates:
     - olist_products_dataset
     - products
@@ -178,6 +98,7 @@ products:
 # --------------------------------------------------------------------------------------------------
 sellers:
   strategy: full
+  target_table: olist_sellers_dataset
   candidates:
     - olist_sellers_dataset
     - sellers
