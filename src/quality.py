@@ -1,13 +1,13 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from src.config.config import OUTPUT_DIR
+from src.config.config import REJECTED_DIR
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def save_error_records(invalid_df, table_name, reason, output_dir=OUTPUT_DIR):
+def save_error_records(invalid_df, table_name, reason, output_dir=REJECTED_DIR):
     if invalid_df is None or invalid_df.empty:
         return
     output_path = Path(output_dir)
@@ -22,7 +22,7 @@ def save_error_records(invalid_df, table_name, reason, output_dir=OUTPUT_DIR):
     logger.warning(f"[QUALITY EXPORT] Đã lưu {len(export_df):,} dòng lỗi vào '{file_path}'.")
 
 
-def check_positive_values(df, columns, allow_zero=False, table_name="DataFrame", output_dir=OUTPUT_DIR):
+def check_positive_values(df, columns, allow_zero=False, table_name="DataFrame", output_dir=REJECTED_DIR):
     if df is None or df.empty:
         logger.warning(f"[{table_name}] DataFrame rỗng, bỏ qua kiểm tra check_positive_values.")
         return True, pd.DataFrame()
@@ -70,7 +70,7 @@ def check_positive_values(df, columns, allow_zero=False, table_name="DataFrame",
     return is_valid, invalid_df
 
 
-def check_chronological_dates(df, start_col, end_col, allow_equal=True, table_name="DataFrame", output_dir=OUTPUT_DIR):
+def check_chronological_dates(df, start_col, end_col, allow_equal=True, table_name="DataFrame", output_dir=REJECTED_DIR):
     if df is None or df.empty:
         logger.warning(f"[{table_name}] DataFrame rỗng, bỏ qua kiểm tra check_chronological_dates.")
         return True, pd.DataFrame()
@@ -113,7 +113,7 @@ def check_chronological_dates(df, start_col, end_col, allow_equal=True, table_na
     return True, pd.DataFrame()
 
 
-def check_valid_categories(df, col, valid_list, case_sensitive=False, allow_null=True, table_name="DataFrame", output_dir=OUTPUT_DIR):
+def check_valid_categories(df, col, valid_list, case_sensitive=False, allow_null=True, table_name="DataFrame", output_dir=REJECTED_DIR):
     if df is None or df.empty or col not in df.columns:
         return True, pd.DataFrame()
 
@@ -154,7 +154,7 @@ def check_valid_categories(df, col, valid_list, case_sensitive=False, allow_null
     return True, pd.DataFrame()
 
 
-def check_range_values(df, col, min_val, max_val, allow_null=True, table_name="DataFrame", output_dir=OUTPUT_DIR):
+def check_range_values(df, col, min_val, max_val, allow_null=True, table_name="DataFrame", output_dir=REJECTED_DIR):
     if df is None or df.empty or col not in df.columns:
         return True, pd.DataFrame()
 
@@ -186,7 +186,7 @@ def check_range_values(df, col, min_val, max_val, allow_null=True, table_name="D
     return True, pd.DataFrame()
 
 
-def check_conditional_not_null(df, condition_col, condition_val, target_col, table_name="DataFrame", output_dir=OUTPUT_DIR):
+def check_conditional_not_null(df, condition_col, condition_val, target_col, table_name="DataFrame", output_dir=REJECTED_DIR):
     if df is None or df.empty:
         return True, pd.DataFrame()
 
@@ -259,108 +259,115 @@ def clean_string_columns(df, columns=None, remove_special_chars=False, table_nam
     return cleaned_df
 
 
-def run_ecommerce_quality_suite(raw_tables, output_dir=OUTPUT_DIR):
-    logger.info("=== [DATA QUALITY SUITE] BẮT ĐẦU QUY TRÌNH KIỂM ĐỊNH & LÀM SẠCH NGHIỆP VỤ ===")
-    cleaned_tables = {}
+VALID_ORDER_STATUSES = [
+    "delivered",
+    "shipped",
+    "canceled",
+    "invoiced",
+    "processing",
+    "unavailable",
+    "approved",
+    "created",
+]
 
-    VALID_ORDER_STATUSES = [
-        "delivered",
-        "shipped",
-        "canceled",
-        "invoiced",
-        "processing",
-        "unavailable",
-        "approved",
-        "created",
-    ]
+VALID_PAYMENT_TYPES = ["credit_card", "boleto", "voucher", "debit_card", "not_defined"]
 
-    VALID_PAYMENT_TYPES = ["credit_card", "boleto", "voucher", "debit_card", "not_defined"]
 
-    for tbl_name, df in raw_tables.items():
-        if df is None or df.empty:
-            cleaned_tables[tbl_name] = df
-            continue
+def run_table_quality_checks(df, tbl_name, output_dir=REJECTED_DIR, is_first_chunk=True):
+    if df is None or df.empty:
+        return df
 
+    if is_first_chunk:
         err_file = Path(output_dir) / f"{tbl_name}_errors.csv"
         if err_file.exists():
             err_file.unlink()
 
-        clean_df = clean_string_columns(df, table_name=tbl_name)
+    clean_df = clean_string_columns(df, table_name=tbl_name)
 
-        if tbl_name in ["order_items", "olist_order_items_dataset"]:
-            check_positive_values(clean_df, columns=["price"], allow_zero=False, table_name=tbl_name, output_dir=output_dir)
-            check_positive_values(clean_df, columns=["freight_value"], allow_zero=True, table_name=tbl_name, output_dir=output_dir)
+    if tbl_name in ["order_items", "olist_order_items_dataset"]:
+        check_positive_values(clean_df, columns=["price"], allow_zero=False, table_name=tbl_name, output_dir=output_dir)
+        check_positive_values(clean_df, columns=["freight_value"], allow_zero=True, table_name=tbl_name, output_dir=output_dir)
 
-        elif tbl_name in ["order_payments", "olist_order_payments_dataset"]:
-            check_positive_values(clean_df, columns=["payment_value"], allow_zero=False, table_name=tbl_name, output_dir=output_dir)
-            check_valid_categories(clean_df, col="payment_type", valid_list=VALID_PAYMENT_TYPES, table_name=tbl_name, output_dir=output_dir)
+    elif tbl_name in ["order_payments", "olist_order_payments_dataset"]:
+        check_positive_values(clean_df, columns=["payment_value"], allow_zero=False, table_name=tbl_name, output_dir=output_dir)
+        check_valid_categories(clean_df, col="payment_type", valid_list=VALID_PAYMENT_TYPES, table_name=tbl_name, output_dir=output_dir)
 
-        elif tbl_name in ["order_reviews", "olist_order_reviews_dataset"]:
-            check_range_values(clean_df, col="review_score", min_val=1, max_val=5, table_name=tbl_name, output_dir=output_dir)
-            check_chronological_dates(
+    elif tbl_name in ["order_reviews", "olist_order_reviews_dataset"]:
+        check_range_values(clean_df, col="review_score", min_val=1, max_val=5, table_name=tbl_name, output_dir=output_dir)
+        check_chronological_dates(
+            clean_df,
+            start_col="review_creation_date",
+            end_col="review_answer_timestamp",
+            allow_equal=False,
+            table_name=tbl_name,
+            output_dir=output_dir,
+        )
+
+    elif tbl_name in ["orders", "olist_orders_dataset"]:
+        check_valid_categories(
+            clean_df,
+            col="order_status",
+            valid_list=VALID_ORDER_STATUSES,
+            table_name=tbl_name,
+            output_dir=output_dir,
+        )
+
+        delivered_col = (
+            "order_delivered_customer_date"
+            if "order_delivered_customer_date" in clean_df.columns
+            else ("delivered_date" if "delivered_date" in clean_df.columns else None)
+        )
+        purchase_col = (
+            "order_purchase_timestamp"
+            if "order_purchase_timestamp" in clean_df.columns
+            else ("order_date" if "order_date" in clean_df.columns else None)
+        )
+        estimated_col = (
+            "order_estimated_delivery_date"
+            if "order_estimated_delivery_date" in clean_df.columns
+            else ("estimated_delivery_date" if "estimated_delivery_date" in clean_df.columns else None)
+        )
+
+        if delivered_col:
+            check_conditional_not_null(
                 clean_df,
-                start_col="review_creation_date",
-                end_col="review_answer_timestamp",
-                allow_equal=False,
+                condition_col="order_status",
+                condition_val="delivered",
+                target_col=delivered_col,
                 table_name=tbl_name,
                 output_dir=output_dir,
             )
-
-        elif tbl_name in ["orders", "olist_orders_dataset"]:
-            check_valid_categories(
-                clean_df,
-                col="order_status",
-                valid_list=VALID_ORDER_STATUSES,
-                table_name=tbl_name,
-                output_dir=output_dir,
-            )
-
-            delivered_col = (
-                "order_delivered_customer_date"
-                if "order_delivered_customer_date" in clean_df.columns
-                else ("delivered_date" if "delivered_date" in clean_df.columns else None)
-            )
-            purchase_col = (
-                "order_purchase_timestamp"
-                if "order_purchase_timestamp" in clean_df.columns
-                else ("order_date" if "order_date" in clean_df.columns else None)
-            )
-            estimated_col = (
-                "order_estimated_delivery_date"
-                if "order_estimated_delivery_date" in clean_df.columns
-                else ("estimated_delivery_date" if "estimated_delivery_date" in clean_df.columns else None)
-            )
-
-            if delivered_col:
-                check_conditional_not_null(
-                    clean_df,
-                    condition_col="order_status",
-                    condition_val="delivered",
-                    target_col=delivered_col,
-                    table_name=tbl_name,
-                    output_dir=output_dir,
-                )
-                if purchase_col:
-                    check_chronological_dates(
-                        clean_df,
-                        start_col=purchase_col,
-                        end_col=delivered_col,
-                        allow_equal=True,
-                        table_name=tbl_name,
-                        output_dir=output_dir,
-                    )
-
-            if estimated_col and purchase_col:
+            if purchase_col:
                 check_chronological_dates(
                     clean_df,
                     start_col=purchase_col,
-                    end_col=estimated_col,
+                    end_col=delivered_col,
                     allow_equal=True,
                     table_name=tbl_name,
                     output_dir=output_dir,
                 )
 
-        cleaned_tables[tbl_name] = clean_df
+        if estimated_col and purchase_col:
+            check_chronological_dates(
+                clean_df,
+                start_col=purchase_col,
+                end_col=estimated_col,
+                allow_equal=True,
+                table_name=tbl_name,
+                output_dir=output_dir,
+            )
+
+    return clean_df
+
+
+def run_ecommerce_quality_suite(raw_tables, output_dir=REJECTED_DIR):
+    logger.info("=== [DATA QUALITY SUITE] BẮT ĐẦU QUY TRÌNH KIỂM ĐỊNH & LÀM SẠCH NGHIỆP VỤ ===")
+    cleaned_tables = {}
+
+    for tbl_name, df in raw_tables.items():
+        cleaned_tables[tbl_name] = run_table_quality_checks(
+            df, tbl_name=tbl_name, output_dir=output_dir, is_first_chunk=True
+        )
 
     logger.info("=== [DATA QUALITY SUITE] HOÀN TẤT KIỂM ĐỊNH & LÀM SẠCH NGHIỆP VỤ 100% ===")
     return cleaned_tables
