@@ -167,7 +167,7 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
                 yield chunk
     except Exception as e:
         logger.error(f"[LỖI TRÍCH XUẤT] Bảng '{logical_name}' gặp lỗi query: {e}. Hủy bảng này và tiếp tục pipeline!")
-        return
+        raise
 
     elapsed = time.time() - start_time
     logger.info(
