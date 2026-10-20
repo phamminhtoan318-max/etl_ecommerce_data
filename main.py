@@ -30,7 +30,6 @@ def main():
     batch_time = datetime.now(timezone.utc)
     batch_id = batch_time.strftime("%Y%m%d_%H%M%S")
     watermark_states = {}
-    enable_quality = True
     pipeline_stats = {}
 
     logger.info(f"🚀 BẮT ĐẦU CHẠY PIPELINE OLIST E-COMMERCE (BATCH ID: {batch_id})")
@@ -59,8 +58,6 @@ def main():
                     strategy=strategy,
                     tgt_engine=tgt_engine,
                     tgt_schema="stg",
-                    logical_name=logical_name,
-                    enable_quality=enable_quality,
                 )
                 elapsed = time.time() - t0
                 pipeline_stats[logical_name] = {

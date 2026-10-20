@@ -151,7 +151,7 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
 
     try:
         with engine.connect().execution_options(stream_results=True) as conn:
-            for chunk in pd.read_sql(query, conn, chunksize=chunksize):
+            for chunk in pd.read_sql(query, conn, chunksize=chunksize, dtype_backend="numpy_nullable"):
                 if chunk.empty:
                     continue
 
