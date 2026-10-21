@@ -1,4 +1,3 @@
--- Active: 1792219119102@@127.0.0.1@1433@E_commerce
 SELECT 'olist_customers_dataset' AS [table_name], COUNT(*) AS [total_rows] FROM [dbo].[olist_customers_dataset] WITH (NOLOCK)
 UNION ALL
 SELECT 'olist_orders_dataset', COUNT(*) FROM [dbo].[olist_orders_dataset] WITH (NOLOCK)

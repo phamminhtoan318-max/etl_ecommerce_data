@@ -1,8 +1,0 @@
-.venv
-.env
-data/
-__pycache__
-logs/
-.git
-*.pyc
-docs/*.bkp
