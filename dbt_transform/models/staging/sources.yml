@@ -1,0 +1,85 @@
+version: 2
+
+sources:
+  - name: staging
+    schema: "{{ env_var('TGT_DB_SCHEMA', 'raw') }}"
+    tables:
+      # 1. Customers (Khóa chính: customer_id)
+      - name: olist_customers_dataset
+        columns:
+          - name: customer_id
+            tests:
+              - unique
+              - not_null
+
+      # 2. Products (Khóa chính: product_id)
+      - name: olist_products_dataset
+        columns:
+          - name: product_id
+            tests:
+              - unique
+              - not_null
+
+      # 3. Sellers (Khóa chính: seller_id)
+      - name: olist_sellers_dataset
+        columns:
+          - name: seller_id
+            tests:
+              - unique
+              - not_null
+
+      # 4. Orders (Khóa chính: order_id)
+      - name: olist_orders_dataset
+        columns:
+          - name: order_id
+            tests:
+              - unique
+              - not_null
+
+      # 5. Order Items (Khóa chính kết hợp: order_id + order_item_id)
+      - name: olist_order_items_dataset
+        tests:
+          - unique_combination:
+              arguments:
+                combination_of_columns:
+                  - order_id
+                  - order_item_id
+        columns:
+          - name: order_id
+            tests:
+              - not_null
+          - name: order_item_id
+            tests:
+              - not_null
+
+      # 6. Order Payments (Khóa chính kết hợp: order_id + payment_sequential)
+      - name: olist_order_payments_dataset
+        tests:
+          - unique_combination:
+              arguments:
+                combination_of_columns:
+                  - order_id
+                  - payment_sequential
+        columns:
+          - name: order_id
+            tests:
+              - not_null
+          - name: payment_sequential
+            tests:
+              - not_null
+
+      # 7. Order Reviews (Khóa chính kết hợp: review_id + order_id)
+      - name: olist_order_reviews_dataset
+        tests:
+          - unique_combination:
+              arguments:
+                combination_of_columns:
+                  - review_id
+                  - order_id
+        columns:
+          - name: review_id
+            tests:
+              - not_null
+          - name: order_id
+            tests:
+              - not_null
