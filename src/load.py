@@ -2,7 +2,7 @@ import io
 import csv
 import pandas as pd
 from sqlalchemy import text
-from src.config.config import STAGING_DDL_SQL_PATH
+from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,17 +23,17 @@ def _psql_copy_method(table, conn, keys, data_iter):
         s_buf.close()
 
 
-def init_staging_tables(tgt_engine, ddl_path=STAGING_DDL_SQL_PATH):
+def init_staging_tables(tgt_engine, ddl_path=STAGING_DDL_SQL_PATH, tgt_schema=TGT_DB_SCHEMA):
     if not ddl_path.exists():
         raise FileNotFoundError(f"Không tìm thấy file DDL khởi tạo Staging: {ddl_path}")
 
-    ddl_sql = ddl_path.read_text(encoding="utf-8")
+    ddl_sql = ddl_path.read_text(encoding="utf-8").replace("{schema}", tgt_schema)
     with tgt_engine.begin() as conn:
         conn.execute(text(ddl_sql))
-    logger.info(f"[INIT STAGING] Đã kiểm tra và khởi tạo cấu trúc bảng Staging từ '{ddl_path.name}'.")
+    logger.info(f"[INIT STAGING] Đã kiểm tra và khởi tạo cấu trúc bảng Staging '{tgt_schema}' từ '{ddl_path.name}'.")
 
 
-def stream_load_table_to_postgres(chunk_stream, table_name, strategy, tgt_engine, tgt_schema="stg"):
+def stream_load_table_to_postgres(chunk_stream, table_name, strategy, tgt_engine, tgt_schema=TGT_DB_SCHEMA):
     total_rows = 0
     norm_strategy = str(strategy).lower().strip()
 

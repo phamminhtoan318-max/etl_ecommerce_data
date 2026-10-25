@@ -1,6 +1,6 @@
-CREATE SCHEMA IF NOT EXISTS stg;
+CREATE SCHEMA IF NOT EXISTS {schema};
 
-CREATE TABLE IF NOT EXISTS stg.olist_customers_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_customers_dataset (
     customer_id              VARCHAR(32),
     customer_unique_id       VARCHAR(32),
     customer_zip_code_prefix INT,
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS stg.olist_customers_dataset (
     _batch_id                VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS stg.olist_products_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_products_dataset (
     product_id                 VARCHAR(32),
     product_category_name      VARCHAR(100),
     product_name_lenght        INT,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS stg.olist_products_dataset (
     _batch_id                  VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS stg.olist_sellers_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_sellers_dataset (
     seller_id              VARCHAR(32),
     seller_zip_code_prefix INT,
     seller_city            VARCHAR(100),
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS stg.olist_sellers_dataset (
     _batch_id              VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS stg.olist_orders_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_orders_dataset (
     order_id                      VARCHAR(32),
     customer_id                   VARCHAR(32),
     order_status                  VARCHAR(20),
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS stg.olist_orders_dataset (
     _batch_id                     VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS stg.olist_order_items_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_order_items_dataset (
     order_id            VARCHAR(32),
     order_item_id       INT,
     product_id          VARCHAR(32),
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS stg.olist_order_items_dataset (
     _batch_id           VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS stg.olist_order_payments_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_order_payments_dataset (
     order_id             VARCHAR(32),
     payment_sequential   INT,
     payment_type         VARCHAR(30),
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS stg.olist_order_payments_dataset (
     _batch_id            VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS stg.olist_order_reviews_dataset (
+CREATE TABLE IF NOT EXISTS {schema}.olist_order_reviews_dataset (
     review_id               VARCHAR(32),
     order_id                VARCHAR(32),
     review_score            INT,

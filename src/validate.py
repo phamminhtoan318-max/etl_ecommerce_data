@@ -1,7 +1,13 @@
 from pathlib import Path
 import pandas as pd
 from sqlalchemy import inspect, text
-from src.config.config import BASE_DIR, EXTRACT_PIPELINE_RULES, VALIDATE_SQL_PATH_SOURCE, VALIDATE_SQL_PATH_STAGING
+from src.config.config import (
+    BASE_DIR,
+    EXTRACT_PIPELINE_RULES,
+    VALIDATE_SQL_PATH_SOURCE,
+    VALIDATE_SQL_PATH_STAGING,
+    TGT_DB_SCHEMA,
+)
 from src.database import get_source_engine, get_target_engine
 from src.extract import OLIST_7_TABLES, resolve_table_name
 from src.logger import get_logger
@@ -315,7 +321,7 @@ def validate_extracted_data(raw_tables, source_baseline=None, schema="dbo", engi
     return True
 
 
-def validate_staging_against_baseline(source_baseline, tgt_schema="stg", tgt_engine=None):
+def validate_staging_against_baseline(source_baseline, tgt_schema=TGT_DB_SCHEMA, tgt_engine=None):
     logger.info("=== [VALIDATE STAGING] BẮT ĐẦU ĐỐI CHIẾU DỮ LIỆU TẦNG STAGING VỚI BASELINE ===")
     tgt_engine = tgt_engine or get_target_engine()
     errors = []
@@ -325,7 +331,7 @@ def validate_staging_against_baseline(source_baseline, tgt_schema="stg", tgt_eng
 
     stg_row_counts = {}
     with tgt_engine.connect() as conn:
-        content = VALIDATE_SQL_PATH_STAGING.read_text(encoding="utf-8")
+        content = VALIDATE_SQL_PATH_STAGING.read_text(encoding="utf-8").replace("{schema}", tgt_schema)
         lines = [line for line in content.splitlines() if not line.strip().startswith("--")]
         clean_statements = [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
 
