@@ -7,15 +7,15 @@ from sqlalchemy import create_engine
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-LOGS_DIR = BASE_DIR / "output" / "logs"
+LOGS_DIR = BASE_DIR / "logs"
 REJECTED_DIR = BASE_DIR / "output" / "rejected"
 VALIDATE_SQL_PATH_SOURCE = BASE_DIR / "sql" / "source" / "validate_source.sql"
-VALIDATE_SQL_PATH_STAGING = BASE_DIR / "sql" / "staging" / "validate_staging.sql"
-STAGING_DDL_SQL_PATH = BASE_DIR / "sql" / "staging" / "01_staging_tables.sql"
+VALIDATE_SQL_PATH_STAGING = BASE_DIR / "sql" / "raw" / "validate_staging.sql"
+STAGING_DDL_SQL_PATH = BASE_DIR / "sql" / "raw" / "raw_table.sql"
 
 for directory in [BASE_DIR, REJECTED_DIR, LOGS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
-
+ 
 load_dotenv(BASE_DIR / ".env")
 
 LOG_LEVEL_CONSOLE = os.getenv("LOG_LEVEL_CONSOLE", "INFO").upper()
@@ -54,6 +54,7 @@ TGT_DB_PORT = os.getenv("TGT_DB_PORT")
 TGT_DB_NAME = os.getenv("TGT_DB_NAME")
 TGT_DB_USER = os.getenv("TGT_DB_USER")
 TGT_DB_PASSWORD = os.getenv("TGT_DB_PASSWORD")
+TGT_DB_SCHEMA = os.getenv("TGT_DB_SCHEMA", "raw")
 
 TGT_SQLALCHEMY_URI = (
     f"postgresql+psycopg2://{TGT_DB_USER}:{quote_plus(TGT_DB_PASSWORD or '')}@{TGT_DB_HOST}:{TGT_DB_PORT}/{TGT_DB_NAME}"
