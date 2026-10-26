@@ -8,12 +8,11 @@ from sqlalchemy import create_engine
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 LOGS_DIR = BASE_DIR / "logs"
-REJECTED_DIR = BASE_DIR / "output" / "rejected"
 VALIDATE_SQL_PATH_SOURCE = BASE_DIR / "sql" / "source" / "validate_source.sql"
 VALIDATE_SQL_PATH_STAGING = BASE_DIR / "sql" / "raw" / "validate_staging.sql"
 STAGING_DDL_SQL_PATH = BASE_DIR / "sql" / "raw" / "raw_table.sql"
 
-for directory in [BASE_DIR, REJECTED_DIR, LOGS_DIR]:
+for directory in [BASE_DIR, LOGS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
  
 load_dotenv(BASE_DIR / ".env")
