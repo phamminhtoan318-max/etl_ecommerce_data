@@ -1,0 +1,145 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Bảng chiều thời gian (Date Dimension)"
+    columns:
+      - name: date_key
+        description: "Khóa chính (Smart Date Key dạng YYYYMMDD)"
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_product
+    description: "Bảng chiều sản phẩm (Product Dimension)"
+    columns:
+      - name: product_key
+        description: "Khóa chính thay thế (Surrogate Key) của sản phẩm"
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_location
+    description: "Bảng chiều địa lý (Location Dimension)"
+    columns:
+      - name: location_key
+        description: "Khóa chính thay thế (Surrogate Key) của địa điểm"
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_seller
+    description: "Bảng chiều người bán (Seller Dimension)"
+    columns:
+      - name: seller_key
+        description: "Khóa chính thay thế của người bán"
+        tests:
+          - unique
+          - not_null
+      - name: location_key
+        description: "Khóa ngoại trỏ sang dim_location"
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+
+  - name: dim_customer
+    description: "Bảng chiều khách hàng áp dụng SCD Type 2 (Customer Dimension)"
+    columns:
+      - name: customer_key
+        description: "Khóa chính thay thế theo từng phiên bản lịch sử khách hàng"
+        tests:
+          - unique
+          - not_null
+      - name: location_key
+        description: "Khóa ngoại trỏ sang dim_location"
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+
+  - name: fact_orders
+    description: "Bảng sự kiện đơn hàng (Fact Orders - Grain: 1 order / dòng)"
+    columns:
+      - name: order_key
+        description: "Khóa chính của bảng fact_orders"
+        tests:
+          - unique
+          - not_null
+      - name: customer_key
+        description: "Khóa ngoại trỏ sang dim_customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: shipping_location_key
+        description: "Khóa ngoại trỏ sang dim_location"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: purchase_date_key
+        description: "Khóa ngoại ngày đặt hàng trỏ sang dim_date"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: approved_date_key
+        description: "Khóa ngoại ngày duyệt đơn trỏ sang dim_date"
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: delivered_date_key
+        description: "Khóa ngoại ngày giao hàng trỏ sang dim_date"
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+
+  - name: fact_sales
+    description: "Bảng sự kiện chi tiết bán hàng (Fact Sales - Grain: 1 order_item / dòng)"
+    columns:
+      - name: sales_key
+        description: "Khóa chính của từng mặt hàng bán ra"
+        tests:
+          - unique
+          - not_null
+      - name: product_key
+        description: "Khóa ngoại trỏ sang dim_product"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_product')
+              field: product_key
+      - name: seller_key
+        description: "Khóa ngoại trỏ sang dim_seller"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_seller')
+              field: seller_key
+      - name: customer_key
+        description: "Khóa ngoại trỏ sang dim_customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_key
+      - name: shipping_location_key
+        description: "Khóa ngoại trỏ sang dim_location"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: purchase_date_key
+        description: "Khóa ngoại ngày mua trỏ sang dim_date"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
