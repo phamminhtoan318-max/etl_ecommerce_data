@@ -4,9 +4,8 @@ with source as (
 
 renamed as (
     select
-        md5(concat(order_id, '-', order_item_id)) as order_item_sk,
         order_id,
-        order_item_id as order_item_seq,
+        order_item_id,
         product_id,
         seller_id,
         shipping_limit_date as shipping_limit_at,
