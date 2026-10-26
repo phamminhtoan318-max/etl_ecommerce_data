@@ -13,6 +13,10 @@ snapshot-paths: ["snapshots"]
 clean-targets:
   - "target"
   - "dbt_packages"
+  - "../logs/dbt.log"
+
+
+log-path: "../logs" 
 
 models:
   dbt_transform:
