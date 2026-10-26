@@ -11,7 +11,7 @@ customers_stg as (
 )
 
 select
-    md5(concat(order_id, '-', order_item_id))::uuid as sales_key,
+    md5(concat(oi.order_id, '-', oi.order_item_id))::uuid as sales_key,
     oi.order_id,
     oi.order_item_id,
     dc.customer_key,
