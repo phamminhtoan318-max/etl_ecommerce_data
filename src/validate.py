@@ -322,7 +322,7 @@ def validate_extracted_data(raw_tables, source_baseline=None, schema="dbo", engi
 
 
 def validate_staging_against_baseline(source_baseline, tgt_schema=TGT_DB_SCHEMA, tgt_engine=None):
-    logger.info("=== [VALIDATE STAGING] BẮT ĐẦU ĐỐI CHIẾU DỮ LIỆU TẦNG STAGING VỚI BASELINE ===")
+    logger.info("=== [VALIDATE] BẮT ĐẦU ĐỐI CHIẾU DỮ LIỆU TẦNG STAGING VỚI BASELINE ===")
     tgt_engine = tgt_engine or get_target_engine()
     errors = []
 
@@ -367,7 +367,7 @@ def validate_staging_against_baseline(source_baseline, tgt_schema=TGT_DB_SCHEMA,
                 errors.append(err)
                 logger.error(err)
             else:
-                logger.info(f"[ĐỐI CHIẾU STAGING] Bảng '{logical_name:<14}': Khớp 100% ({stg_rows:>7,} dòng)")
+                logger.info(f"[ĐỐI CHIẾU] Bảng '{logical_name:<14}': ({stg_rows:>7,} dòng)")
 
     if errors:
         summary_err = (
@@ -377,5 +377,5 @@ def validate_staging_against_baseline(source_baseline, tgt_schema=TGT_DB_SCHEMA,
         logger.error(summary_err)
         raise ValueError(summary_err)
 
-    logger.info("=== ✅ [ĐỐI CHIẾU STAGING THÀNH CÔNG 100%] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀO TARGET! ===")
+    logger.info("=== ✅ [ĐỐI CHIẾU THÀNH CÔNG] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀO TARGET! ===")
     return True

@@ -1,5 +1,6 @@
 import io
 import csv
+import time
 import pandas as pd
 from sqlalchemy import text
 from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
@@ -56,3 +57,45 @@ def stream_load_table_to_postgres(chunk_stream, table_name, strategy, tgt_engine
             total_rows += len(chunk)
 
     return total_rows
+
+
+def load_single_table(logical_name, actual_name, rule, chunk_stream, tgt_engine, tgt_schema=TGT_DB_SCHEMA) -> dict:
+    target_table = rule.get("target_table") or actual_name
+    strategy = rule.get("strategy", "cancel")
+    t0 = time.time()
+
+    logger.info(f"[PIPELINE] Bắt đầu nạp {logical_name} (nguồn: {actual_name}) -> {tgt_schema}.{target_table}")
+    try:
+        loaded_rows = stream_load_table_to_postgres(
+            chunk_stream=chunk_stream,
+            table_name=target_table,
+            strategy=strategy,
+            tgt_engine=tgt_engine,
+            tgt_schema=tgt_schema,
+        )
+        elapsed = time.time() - t0
+        logger.info(
+            f"[PIPELINE] Đã nạp thành công {loaded_rows:,} dòng vào {tgt_schema}.{target_table} ({elapsed:.2f}s)"
+        )
+        return {
+            "source_table": actual_name,
+            "target_table": f"{tgt_schema}.{target_table}",
+            "strategy": strategy,
+            "loaded_rows": loaded_rows,
+            "elapsed_sec": round(elapsed, 2),
+            "status": "SUCCESS",
+        }
+    except Exception as e:
+        elapsed = time.time() - t0
+        logger.error(
+            f"[PIPELINE ERROR] Lỗi khi nạp bảng '{logical_name}' -> Đã rollback bảng {tgt_schema}.{target_table}: {e}"
+        )
+        return {
+            "source_table": actual_name,
+            "target_table": f"{tgt_schema}.{target_table}",
+            "strategy": strategy,
+            "loaded_rows": 0,
+            "elapsed_sec": round(elapsed, 2),
+            "status": f"FAILED ({e})",
+        }
+
