@@ -4,7 +4,7 @@ from logging.handlers import RotatingFileHandler
 from src.config.config import LOGS_DIR, LOG_LEVEL_CONSOLE, LOG_LEVEL_FILE
 
 
-def setup_logging(log_filename = "pipeline_etl.log"):
+def setup_logging(log_filename = "extract_load.log"):
     root = logging.getLogger()
     if root.handlers:
         return root
