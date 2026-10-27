@@ -28,7 +28,7 @@ payments_agg as (
 
 reviews_agg as (
     select
-        order_id, 
+        order_id,
         round(avg(review_score), 1)::decimal(3, 1) as review_score
     from {{ ref('stg_order_reviews') }}
     group by order_id
@@ -37,7 +37,7 @@ reviews_agg as (
 select
     md5(o.order_id)::uuid as order_key,
     o.order_id,
-    dc.customer_key, 
+    dc.customer_key,
     dl.location_key as shipping_location_key,
     to_char(o.purchased_at, 'YYYYMMDD')::integer as purchase_date_key,
     to_char(o.approved_at, 'YYYYMMDD')::integer as approved_date_key,
@@ -63,8 +63,8 @@ left join {{ ref('dim_location') }} dl
     and cs.customer_state = dl.state_code
 left join {{ ref('dim_customer') }} dc
     on cs.customer_unique_id = dc.customer_unique_id
-    and o.purchased_at >= dc.valid_from
-    and o.purchased_at < dc.valid_to
+    and coalesce(o.purchased_at, '2016-01-01'::timestamp) >= dc.valid_from
+    and coalesce(o.purchased_at, '2016-01-01'::timestamp) < dc.valid_to
 left join items_agg i
     on o.order_id = i.order_id
 left join payments_agg p

@@ -79,3 +79,12 @@ CREATE TABLE IF NOT EXISTS {schema}.olist_order_reviews_dataset (
     _extracted_at           TIMESTAMP,
     _batch_id               VARCHAR(30)
 );
+
+CREATE TABLE IF NOT EXISTS {schema}._etl_watermarks (
+    logical_name     VARCHAR(50) PRIMARY KEY,
+    target_table     VARCHAR(100) NOT NULL,
+    watermark_column VARCHAR(100) NOT NULL,
+    last_watermark   TIMESTAMP NOT NULL,
+    last_batch_id    VARCHAR(30),
+    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

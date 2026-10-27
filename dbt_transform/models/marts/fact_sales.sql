@@ -32,8 +32,8 @@ left join {{ ref('dim_location') }} dl
     and cs.customer_state = dl.state_code
 left join {{ ref('dim_customer') }} dc
     on cs.customer_unique_id = dc.customer_unique_id
-    and o.purchased_at >= dc.valid_from
-    and o.purchased_at < dc.valid_to
+    and coalesce(o.purchased_at, '2016-01-01'::timestamp) >= dc.valid_from
+    and coalesce(o.purchased_at, '2016-01-01'::timestamp) < dc.valid_to
 left join {{ ref('dim_product') }} dp
     on oi.product_id = dp.product_id
 left join {{ ref('dim_seller') }} ds
