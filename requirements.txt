@@ -6,3 +6,5 @@ python-dotenv==1.2.4
 SQLAlchemy==2.1.4
 psycopg2-binary==2.9.10
 pyyaml==6.0.3
+dbt-core==1.12.6
+dbt-postgres==1.11.0
