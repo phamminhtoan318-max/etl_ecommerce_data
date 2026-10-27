@@ -1,0 +1,12 @@
+.venv
+.env
+data/
+__pycache__
+logs/
+.git
+*.pyc
+docs/*.bkp
+dbt_transform/target/
+dbt_transform/logs/
+dbt_transform/dbt_packages/
+dbt_transform/.user.yml
