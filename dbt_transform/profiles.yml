@@ -1,0 +1,12 @@
+dbt_transform:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('TGT_DB_HOST', 'localhost') }}"
+      port: "{{ env_var('TGT_DB_PORT', '5432') | as_number }}"
+      user: "{{ env_var('TGT_DB_USER', 'postgres') }}"
+      password: "{{ env_var('TGT_DB_PASSWORD') }}"
+      dbname: "{{ env_var('TGT_DB_NAME', 'olist_dwh') }}"
+      schema: analytics
+      threads: 12
