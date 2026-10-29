@@ -165,11 +165,17 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
     total_rows = 0
     chunk_idx = 0
     col_count = 0
+    extract_duration = 0.0
 
     try:
         with engine.connect().execution_options(stream_results=True) as conn:
-            for chunk in pd.read_sql(query, conn, chunksize=chunksize, dtype_backend="numpy_nullable"):
+            reader = pd.read_sql(query, conn, chunksize=chunksize, dtype_backend="numpy_nullable")
+            t0 = time.time()
+            for chunk in reader:
+                extract_duration += time.time() - t0
+
                 if chunk.empty:
+                    t0 = time.time()
                     continue
 
                 chunk_idx += 1
@@ -182,14 +188,17 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
 
                 logger.debug(f"[EXTRACT] Chunk #{chunk_idx} '{logical_name}': {len(chunk):,} dòng")
                 yield chunk
+                t0 = time.time()
     except Exception as e:
         logger.error(f"[LỖI TRÍCH XUẤT] Bảng '{logical_name}' gặp lỗi query: {e}. Rollback bảng này và đánh dấu FAILED!")
         raise
 
-    elapsed = time.time() - start_time
+    speed = (total_rows / extract_duration) if extract_duration > 0 else 0
     logger.info(
-        f"[EXTRACT] Hoàn tất stream '{logical_name:<14}': {total_rows:>7,} dòng, "
-        f"{col_count:>2} cột ({chunk_idx} chunks, {elapsed:>5.2f}s)"
+        f"[EXTRACT] Hoàn tất trích xuất '{logical_name:<14}': {total_rows:>7,} dòng, "
+        f"{col_count:>2} cột ({chunk_idx} chunks, {extract_duration:>5.2f}s, {speed:,.0f} dòng/giây)"
+        if extract_duration > 0
+        else f"[EXTRACT] Hoàn tất trích xuất '{logical_name:<14}': {total_rows:>7,} dòng"
     )
 
 
