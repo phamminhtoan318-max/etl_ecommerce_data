@@ -1,21 +1,38 @@
 import sys
 import time
 from datetime import datetime, timezone
-from src.config.config import TGT_DB_SCHEMA
+from src.config.config import EXTRACT_PIPELINE_RULES, TGT_DB_SCHEMA
 from src.database import get_source_engine, get_target_engine, test_connections
 from src.extract import extract_from_sqlserver
-from src.load import init_staging_tables, load_single_table
+from src.load import get_watermark_states, init_staging_tables, load_single_table
 from src.logger import get_logger
-from src.validate import measure_source_baseline, validate_staging_against_baseline
+from src.validate.validate_pipeline import measure_source_baseline, validate_staging_against_baseline
 
 logger = get_logger(__name__)
+
+REQUIRED_TABLES = [
+    name
+    for name, rule in EXTRACT_PIPELINE_RULES.items()
+    if str(rule.get("strategy", "")).lower().strip() != "cancel"
+]
+
+
+def ensure_all_tables_loaded(pipeline_stats):
+    failed = {n: s["status"] for n, s in pipeline_stats.items() if s["status"] != "SUCCESS"}
+    skipped = [n for n in REQUIRED_TABLES if n not in pipeline_stats]
+
+    if failed or skipped:
+        details = [f"  - {n}: {status}" for n, status in failed.items()]
+        details += [f"  - {n}: SKIPPED (không được extract/load)" for n in skipped]
+        raise RuntimeError(
+            f"Có {len(failed) + len(skipped)} bảng không nạp thành công -> DỪNG PIPELINE:\n" + "\n".join(details)
+        )
 
 
 def main():
     pipeline_start = time.time()
     batch_time = datetime.now(timezone.utc)
     batch_id = batch_time.strftime("%Y%m%d_%H%M%S")
-    watermark_states = {}
     pipeline_stats = {}
 
     logger.info(f"🚀 BẮT ĐẦU CHẠY PIPELINE (BATCH ID: {batch_id})")
@@ -23,10 +40,11 @@ def main():
     try:
         test_connections()
 
-        source_baseline = measure_source_baseline()
-
         tgt_engine = get_target_engine()
         init_staging_tables(tgt_engine, tgt_schema=TGT_DB_SCHEMA)
+        watermark_states = get_watermark_states(tgt_engine, tgt_schema=TGT_DB_SCHEMA)
+
+        source_baseline = measure_source_baseline(watermark_states=watermark_states)
 
         for logical_name, actual_name, rule, chunk_stream in extract_from_sqlserver(
             batch_time=batch_time, watermark_states=watermark_states
@@ -35,7 +53,14 @@ def main():
                 logical_name, actual_name, rule, chunk_stream, tgt_engine, tgt_schema=TGT_DB_SCHEMA
             )
 
-        validate_staging_against_baseline(source_baseline=source_baseline, tgt_schema=TGT_DB_SCHEMA)
+        ensure_all_tables_loaded(pipeline_stats)
+
+        validate_staging_against_baseline(
+            source_baseline=source_baseline,
+            pipeline_stats=pipeline_stats,
+            tgt_schema=TGT_DB_SCHEMA,
+            tgt_engine=tgt_engine,
+        )
 
         for name, stat in pipeline_stats.items():
             logger.debug(
