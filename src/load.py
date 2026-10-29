@@ -2,7 +2,7 @@ import csv
 import io
 import time
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from src.config.config import EXTRACT_PIPELINE_RULES, STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
 from src.logger import get_logger
 from src.schema_contract import sync_target_schema_evolution
@@ -36,6 +36,68 @@ def _psql_copy_method(table, conn, keys, data_iter):
         s_buf.close()
 
 
+def ensure_staging_primary_keys(tgt_engine, tgt_schema=TGT_DB_SCHEMA):
+    try:
+        inspector = inspect(tgt_engine)
+        existing_tables = set(inspector.get_table_names(schema=tgt_schema))
+
+        for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
+            tbl = rule.get("target_table")
+            primary_keys = rule.get("primary_keys") or []
+            if not tbl or not primary_keys or tbl not in existing_tables:
+                continue
+
+            pk_constraint = inspector.get_pk_constraint(tbl, schema=tgt_schema)
+            existing_pk_cols = pk_constraint.get("constrained_columns") or []
+            if set(existing_pk_cols) == set(primary_keys):
+                continue
+
+            null_conditions = " OR ".join(f'"{col}" IS NULL' for col in primary_keys)
+            with tgt_engine.connect() as conn:
+                null_count = conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{tgt_schema}"."{tbl}" WHERE {null_conditions};')
+                ).scalar()
+
+            if null_count > 0:
+                logger.warning(
+                    f"[STAGING PK CHECK] Bảng '{tgt_schema}.{tbl}' có {null_count:,} dòng mang PK NULL! "
+                    f"Tạm thời bỏ qua việc gắn PRIMARY KEY để tránh lỗi."
+                )
+                continue
+
+            cols_str = ", ".join(f'"{col}"' for col in primary_keys)
+            with tgt_engine.connect() as conn:
+                dup_count = conn.execute(
+                    text(
+                        f'SELECT COUNT(*) FROM ('
+                        f'SELECT {cols_str} FROM "{tgt_schema}"."{tbl}" '
+                        f'GROUP BY {cols_str} HAVING COUNT(*) > 1'
+                        f') AS _dup;'
+                    )
+                ).scalar()
+
+            if dup_count > 0:
+                logger.warning(
+                    f"[STAGING PK CHECK] Bảng '{tgt_schema}.{tbl}' có {dup_count:,} nhóm khóa chính bị trùng lặp! "
+                    f"Tạm thời bỏ qua việc gắn PRIMARY KEY để tránh lỗi."
+                )
+                continue
+
+            try:
+                with tgt_engine.begin() as conn:
+                    for col in primary_keys:
+                        conn.execute(text(f'ALTER TABLE "{tgt_schema}"."{tbl}" ALTER COLUMN "{col}" SET NOT NULL;'))
+                    pk_name = f"pk_{tbl}"
+                    conn.execute(
+                        text(f'ALTER TABLE "{tgt_schema}"."{tbl}" ADD CONSTRAINT "{pk_name}" PRIMARY KEY ({cols_str});')
+                    )
+                logger.info(f"🔑 [STAGING PK] Đã tạo thành công Khóa chính & Index cho '{tgt_schema}.{tbl}' ({cols_str}).")
+            except Exception as e:
+                logger.warning(f"[STAGING PK ERROR] Chưa thể tạo PK cho '{tgt_schema}.{tbl}': {e}")
+    except Exception as e:
+        logger.debug(f"[STAGING PK] Lỗi khi kiểm tra PK trong schema '{tgt_schema}': {e}")
+
+
 def init_staging_tables(tgt_engine, ddl_path=STAGING_DDL_SQL_PATH, tgt_schema=TGT_DB_SCHEMA):
     if not ddl_path.exists():
         raise FileNotFoundError(f"Không tìm thấy file DDL khởi tạo Staging: {ddl_path}")
@@ -44,6 +106,7 @@ def init_staging_tables(tgt_engine, ddl_path=STAGING_DDL_SQL_PATH, tgt_schema=TG
     with tgt_engine.begin() as conn:
         conn.execute(text(ddl_sql))
     logger.info(f"[INIT STAGING] Đã kiểm tra và khởi tạo cấu trúc bảng Staging '{tgt_schema}' từ '{ddl_path.name}'.")
+    ensure_staging_primary_keys(tgt_engine, tgt_schema=tgt_schema)
 
 
 def get_watermark_states(tgt_engine, tgt_schema=TGT_DB_SCHEMA) -> dict:
@@ -115,6 +178,34 @@ def _upsert_watermark_state(
     )
 
 
+def _clean_and_dedup_chunk(chunk, primary_keys, table_name, batch_label=""):
+    if not primary_keys or chunk.empty:
+        return chunk
+
+    valid_pks = [pk for pk in primary_keys if pk in chunk.columns]
+    if not valid_pks:
+        return chunk
+
+    null_mask = chunk[valid_pks].isna().any(axis=1)
+    if null_mask.any():
+        null_rows = int(null_mask.sum())
+        logger.warning(
+            f"[DATA INTEGRITY] Phát hiện {null_rows:,} dòng mang PK NULL trong {batch_label} bảng '{table_name}'. "
+            f"Tự động lọc bỏ các dòng này để bảo vệ toàn vẹn khóa chính."
+        )
+        chunk = chunk[~null_mask]
+
+    dup_count = int(chunk.duplicated(subset=valid_pks).sum())
+    if dup_count > 0:
+        logger.warning(
+            f"[DEDUPLICATION] Phát hiện {dup_count:,} dòng trùng lặp khóa chính trong {batch_label} bảng '{table_name}'. "
+            f"Tự động giữ bản ghi mới nhất."
+        )
+        chunk = chunk.drop_duplicates(subset=valid_pks, keep="last")
+
+    return chunk
+
+
 def stream_load_table_to_postgres(
     chunk_stream,
     table_name,
@@ -142,6 +233,9 @@ def stream_load_table_to_postgres(
             logger.info(f'[TRUNCATE] Đã làm sạch bảng "{tgt_schema}"."{table_name}" (giữ nguyên cấu trúc DDL).')
 
             for chunk in chunk_stream:
+                chunk = _clean_and_dedup_chunk(chunk, primary_keys, table_name)
+                if chunk.empty:
+                    continue
                 if "_batch_id" in chunk.columns and len(chunk) > 0:
                     last_batch_id = str(chunk["_batch_id"].iloc[0])
                 chunk.to_sql(
@@ -181,6 +275,7 @@ def stream_load_table_to_postgres(
         try:
             for chunk in chunk_stream:
                 batch_idx += 1
+                chunk = _clean_and_dedup_chunk(chunk, primary_keys, table_name, f"chunk #{batch_idx}")
                 chunk_rows = len(chunk)
                 if chunk_rows == 0:
                     continue
