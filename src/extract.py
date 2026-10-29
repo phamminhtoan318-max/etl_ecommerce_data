@@ -18,7 +18,7 @@ def resolve_table_name(db_tables, candidates):
     return None
 
 
-def build_dynamic_query(logical_name, sql_table_name, rule, last_watermark=None, schema="dbo"):
+def build_dynamic_query(logical_name, sql_table_name, rule, last_watermark=None, schema="dbo", include_order_by=True):
     strategy = rule.get("strategy")
     if not strategy:
         logger.error(f"[{logical_name}] LỖI CẤU HÌNH: Thiếu 'strategy' trong YAML! -> HỦY trích xuất bảng này.")
@@ -127,6 +127,9 @@ def build_dynamic_query(logical_name, sql_table_name, rule, last_watermark=None,
     if where_filter:
         base_query = f"{base_query} WHERE {where_filter}"
 
+    if include_order_by and strategy in ("watermark", "lookback_window", "date_range") and col:
+        base_query = f"{base_query} ORDER BY [{col}] ASC"
+
     return base_query
 
 
@@ -166,7 +169,7 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
                 logger.debug(f"[EXTRACT] Chunk #{chunk_idx} '{logical_name}': {len(chunk):,} dòng")
                 yield chunk
     except Exception as e:
-        logger.error(f"[LỖI TRÍCH XUẤT] Bảng '{logical_name}' gặp lỗi query: {e}. Hủy bảng này và tiếp tục pipeline!")
+        logger.error(f"[LỖI TRÍCH XUẤT] Bảng '{logical_name}' gặp lỗi query: {e}. Rollback bảng này và đánh dấu FAILED!")
         raise
 
     elapsed = time.time() - start_time

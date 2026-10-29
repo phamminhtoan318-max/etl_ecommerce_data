@@ -65,7 +65,7 @@ IF OBJECT_ID(N'[dbo].[olist_order_payments_dataset]', N'U') IS NULL
 BEGIN
     CREATE TABLE [dbo].[olist_order_payments_dataset] (
         [order_id]             VARCHAR(32)    NOT NULL,
-        [payment_sequential]   INT            NULL,
+        [payment_sequential]   INT            NOT NULL,
         [payment_type]         VARCHAR(30)    NULL,
         [payment_installments] INT            NULL,
         [payment_value]        DECIMAL(10, 2) NULL
@@ -76,7 +76,7 @@ IF OBJECT_ID(N'[dbo].[olist_order_reviews_dataset]', N'U') IS NULL
 BEGIN
     CREATE TABLE [dbo].[olist_order_reviews_dataset] (
         [review_id]               VARCHAR(32)    NOT NULL,
-        [order_id]                VARCHAR(32)    NULL,
+        [order_id]                VARCHAR(32)    NOT NULL,
         [review_score]            INT            NULL,
         [review_comment_title]    NVARCHAR(255)  NULL,
         [review_comment_message]  NVARCHAR(MAX)  NULL,
