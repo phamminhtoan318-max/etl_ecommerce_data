@@ -6,7 +6,7 @@ from src.config.config import (
 from src.database import get_source_engine
 from src.extract import OLIST_7_TABLES, build_dynamic_query, resolve_table_name
 from src.logger import get_logger
-from src.schema_contract import resolve_and_validate_columns
+from src.schema import resolve_and_validate_columns
 
 logger = get_logger(__name__)
 

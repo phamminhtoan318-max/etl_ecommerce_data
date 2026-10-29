@@ -1,13 +1,18 @@
 import sys
 import time
 from datetime import datetime, timezone
-from sqlalchemy import text
+from src.checkpoint import get_watermark_states
 from src.config.config import EXTRACT_PIPELINE_RULES, TGT_DB_SCHEMA
 from src.database import get_source_engine, get_target_engine, test_connections
 from src.extract import extract_from_sqlserver
-from src.load import get_watermark_states, init_staging_tables, load_single_table
+from src.load import load_single_table
 from src.logger import get_logger
-from src.schema_contract import SchemaValidationError
+from src.schema import (
+    SchemaValidationError,
+    cleanup_temp_schemas,
+    execute_atomic_swap,
+    prepare_staging_schema,
+)
 from src.validate.validate_pipeline import measure_source_baseline, validate_staging_against_baseline
 
 logger = get_logger(__name__)
@@ -20,6 +25,7 @@ REQUIRED_TABLES = [
 
 
 def ensure_all_tables_loaded(pipeline_stats):
+    """Xác nhận tất cả các bảng bắt buộc đều đã được nạp thành công trước khi hoán đổi schema."""
     failed = {n: s["status"] for n, s in pipeline_stats.items() if s["status"] != "SUCCESS"}
     skipped = [n for n in REQUIRED_TABLES if n not in pipeline_stats]
 
@@ -40,57 +46,29 @@ def main():
     target_schema = TGT_DB_SCHEMA
     tmp_schema = f"{target_schema}_staging_tmp"
     backup_schema = f"{target_schema}_old"
-
     tgt_engine = None
 
     logger.info(f"🚀 BẮT ĐẦU CHẠY PIPELINE (BATCH ID: {batch_id})")
 
     try:
+        # 1. Kiểm tra kết nối tới cả 2 cơ sở dữ liệu
         test_connections()
-
         tgt_engine = get_target_engine()
 
+        # 2. Đọc mốc checkpoint watermark từ schema chính thức
         watermark_states = get_watermark_states(tgt_engine, tgt_schema=target_schema)
 
-        with tgt_engine.begin() as conn:
-            conn.execute(text(f'DROP SCHEMA IF EXISTS "{tmp_schema}" CASCADE;'))
-            conn.execute(text(f'DROP SCHEMA IF EXISTS "{backup_schema}" CASCADE;'))
+        # 3. Chuẩn bị schema nháp Blue-Green Staging (DDL, watermark, dữ liệu base)
+        prepare_staging_schema(
+            tgt_engine=tgt_engine,
+            tmp_schema=tmp_schema,
+            target_schema=target_schema,
+        )
 
-        init_staging_tables(tgt_engine, tgt_schema=tmp_schema)
-
-        with tgt_engine.connect() as conn:
-            target_exists = conn.execute(
-                text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :s"),
-                {"s": target_schema},
-            ).scalar() is not None
-
-        if target_exists:
-            try:
-                with tgt_engine.begin() as conn:
-                    conn.execute(text(f"""
-                        INSERT INTO "{tmp_schema}"."_etl_watermarks"
-                        SELECT * FROM "{target_schema}"."_etl_watermarks"
-                        ON CONFLICT (logical_name) DO NOTHING;
-                    """))
-            except Exception as e:
-                logger.debug(f"[SCHEMA SWAP] Chưa thể sao chép watermark từ '{target_schema}': {e}")
-
-            for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
-                if str(rule.get("strategy", "")).lower().strip() != "full":
-                    tbl = rule.get("target_table")
-                    if tbl:
-                        try:
-                            with tgt_engine.begin() as conn:
-                                conn.execute(text(f"""
-                                    INSERT INTO "{tmp_schema}"."{tbl}"
-                                    SELECT * FROM "{target_schema}"."{tbl}"
-                                    ON CONFLICT DO NOTHING;
-                                """))
-                        except Exception as e:
-                            logger.debug(f"[SCHEMA SWAP] Chưa thể sao chép dữ liệu cơ sở bảng '{tbl}': {e}")
-
+        # 4. Đo baseline số dòng trên nguồn SQL Server
         source_baseline = measure_source_baseline(watermark_states=watermark_states, batch_time=batch_time)
 
+        # 5. Vòng lặp Extract & Load streaming tuần tự từng bảng vào schema nháp
         for logical_name, actual_name, rule, chunk_stream in extract_from_sqlserver(
             batch_time=batch_time, watermark_states=watermark_states
         ):
@@ -98,8 +76,10 @@ def main():
                 logical_name, actual_name, rule, chunk_stream, tgt_engine, tgt_schema=tmp_schema
             )
 
+        # 6. Kiểm định tính toàn vẹn nạp của tất cả bảng
         ensure_all_tables_loaded(pipeline_stats)
 
+        # 7. Đối soát số dòng 2 tầng giữa Staging và Source Baseline
         validate_staging_against_baseline(
             source_baseline=source_baseline,
             pipeline_stats=pipeline_stats,
@@ -107,21 +87,13 @@ def main():
             tgt_engine=tgt_engine,
         )
 
-        logger.info(f"🔄 Đang thực hiện Atomic Schema Swap: '{tmp_schema}' -> '{target_schema}'...")
-        with tgt_engine.begin() as conn:
-            has_old = conn.execute(
-                text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :s"),
-                {"s": target_schema},
-            ).scalar() is not None
-
-            if has_old:
-                conn.execute(text(f'ALTER SCHEMA "{target_schema}" RENAME TO "{backup_schema}";'))
-                conn.execute(text(f'ALTER SCHEMA "{tmp_schema}" RENAME TO "{target_schema}";'))
-                conn.execute(text(f'DROP SCHEMA "{backup_schema}" CASCADE;'))
-            else:
-                conn.execute(text(f'ALTER SCHEMA "{tmp_schema}" RENAME TO "{target_schema}";'))
-
-        logger.info(f"✨ Atomic Schema Swap thành công! Schema '{target_schema}' đã sẵn sàng 100%.")
+        # 8. Hoán đổi schema nguyên tử (Atomic Schema Swap trong 0.05s)
+        execute_atomic_swap(
+            tgt_engine=tgt_engine,
+            tmp_schema=tmp_schema,
+            target_schema=target_schema,
+            backup_schema=backup_schema,
+        )
 
         for name, stat in pipeline_stats.items():
             logger.debug(
@@ -142,24 +114,12 @@ def main():
             f"🛑 [SCHEMA CONTRACT ERROR] PIPELINE DỪNG CÓ KIỂM SOÁT DO THAY ĐỔI CẤU TRÚC NGUỒN KHÔNG HỢP LỆ "
             f"(sau {total_elapsed:.2f}s):\n{sve}"
         )
-        if tgt_engine is not None:
-            try:
-                with tgt_engine.begin() as conn:
-                    conn.execute(text(f'DROP SCHEMA IF EXISTS "{tmp_schema}" CASCADE;'))
-                    conn.execute(text(f'DROP SCHEMA IF EXISTS "{backup_schema}" CASCADE;'))
-            except Exception:
-                pass
+        cleanup_temp_schemas(tgt_engine, tmp_schema, backup_schema)
         sys.exit(1)
     except Exception as exc:
         total_elapsed = time.time() - pipeline_start
         logger.error(f"💥 PIPELINE THẤT BẠI SAU {total_elapsed:.2f}s: {exc}")
-        if tgt_engine is not None:
-            try:
-                with tgt_engine.begin() as conn:
-                    conn.execute(text(f'DROP SCHEMA IF EXISTS "{tmp_schema}" CASCADE;'))
-                    conn.execute(text(f'DROP SCHEMA IF EXISTS "{backup_schema}" CASCADE;'))
-            except Exception:
-                pass
+        cleanup_temp_schemas(tgt_engine, tmp_schema, backup_schema)
         sys.exit(1)
     finally:
         try:

@@ -6,7 +6,7 @@ from sqlalchemy import inspect, text
 from src.config.config import BASE_DIR, EXTRACT_PIPELINE_RULES, OLIST_7_TABLES
 from src.database import get_source_engine
 from src.logger import get_logger
-from src.schema_contract import (
+from src.schema import (
     SchemaValidationError,
     parse_columns_config,
     resolve_and_validate_columns,
