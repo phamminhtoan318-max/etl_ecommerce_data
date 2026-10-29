@@ -6,30 +6,36 @@ services:
     environment:
       POSTGRES_DB: ${TGT_DB_NAME:-olist_dwh}
       POSTGRES_USER: ${TGT_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${TGT_DB_PASSWORD:-123}
+      POSTGRES_PASSWORD: "${TGT_DB_PASSWORD:?Thieu TGT_DB_PASSWORD - chay bang ./run.sh docker}"
     ports:
       - "${TGT_DB_PORT:-5432}:5432"
     volumes:
       - postgres_dwh_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - etl_network
 
   etl_pipeline:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: Docker/Dockerfile
     container_name: olist_etl_app
     depends_on:
-      - postgres_dwh
+      postgres_dwh:
+        condition: service_healthy
     env_file:
-      - .env
+      - ../.env
     environment:
       - SRC_DB_SERVER=host.docker.internal
       - SRC_DB_TRUSTED_CONNECTION=no
       - TGT_DB_HOST=postgres_dwh
+      - TGT_DB_PORT=5432
     volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
+      - ../logs:/app/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

@@ -25,5 +25,5 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     SRC_DB_TRUSTED_CONNECTION=no
 
-# 5. Lệnh chạy pipeline
-CMD ["python", "main.py"]
+# 5. Lệnh chạy toàn bộ pipeline (Extract-Load -> dbt run -> dbt test)
+CMD ["bash", "run.sh", "pipeline"]

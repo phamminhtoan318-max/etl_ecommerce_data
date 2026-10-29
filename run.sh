@@ -2,24 +2,44 @@
 
 set -e
 
+cd "$(dirname "$0")"
+
+# Nạp biến từ .env (bỏ CRLF của Windows). Không ghi đè biến đã có sẵn
+# trong môi trường (vd: docker-compose set TGT_DB_HOST=postgres_dwh).
+if [ -f ".env" ]; then
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        key="${key%$'\r'}"
+        value="${value%$'\r'}"
+        case "$key" in ''|\#*) continue ;; esac
+        if [ -z "${!key+x}" ]; then
+            export "$key=$value"
+        fi
+    done < .env
+fi
+
+export DBT_LOG_PATH="../logs"
+
 if [ -f ".venv/Scripts/python.exe" ]; then
-    PYTHON=".venv/Scripts/python.exe"
-    DBT="../.venv/Scripts/dbt.exe"
+    PYTHON="$PWD/.venv/Scripts/python.exe"
+    DBT="$PWD/.venv/Scripts/dbt.exe"
+elif [ -f ".venv/bin/python" ]; then
+    PYTHON="$PWD/.venv/bin/python"
+    DBT="$PWD/.venv/bin/dbt"
 else
-    PYTHON=".venv/bin/python"
-    DBT="../.venv/bin/dbt"
+    PYTHON="python"
+    DBT="dbt"
 fi
 
 extract_load() {
-    $PYTHON main.py
+    "$PYTHON" main.py
 }
 
 transform() {
-    (cd dbt_transform && $DBT run)
+    (cd dbt_transform && "$DBT" run)
 }
 
 test_models() {
-    (cd dbt_transform && $DBT test)
+    (cd dbt_transform && "$DBT" test)
 }
 
 pipeline() {
@@ -30,7 +50,11 @@ pipeline() {
 }
 
 clean() {
-    (cd dbt_transform && $DBT clean)
+    (cd dbt_transform && "$DBT" clean)
+}
+
+docker_up() {
+    docker compose --env-file .env -f Docker/docker-compose.yml up --build
 }
 
 show_help() {
@@ -40,6 +64,7 @@ show_help() {
     echo "  ./run.sh test         - Chay dbt test kiem tra chat luong du lieu (luu loi vao DB)"
     echo "  ./run.sh pipeline     - Chay toan bo pipeline tu E&L den Transform & Test"
     echo "  ./run.sh clean        - Don dep thu muc build cua dbt"
+    echo "  ./run.sh docker       - Build va chay Postgres + pipeline bang Docker Compose"
 }
 
 case "$1" in
@@ -57,6 +82,9 @@ case "$1" in
         ;;
     clean)
         clean
+        ;;
+    docker)
+        docker_up
         ;;
     *)
         show_help
