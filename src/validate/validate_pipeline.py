@@ -6,9 +6,9 @@ from src.validate.validate_target import validate_staging_against_baseline
 logger = get_logger(__name__)
 
 
-def run_source_validation(schema="dbo", engine=None, watermark_states=None):
+def run_source_validation(schema="dbo", engine=None, watermark_states=None, batch_time=None):
     logger.info("[VALIDATE ORCHESTRATOR] Bắt đầu bước kiểm định và đo baseline nguồn...")
-    return measure_source_baseline(schema=schema, engine=engine, watermark_states=watermark_states)
+    return measure_source_baseline(schema=schema, engine=engine, watermark_states=watermark_states, batch_time=batch_time)
 
 
 def run_staging_validation(

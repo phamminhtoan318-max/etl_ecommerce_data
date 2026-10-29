@@ -16,7 +16,7 @@ def _parse_sql_statements(sql_text):
     return [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
 
 
-def measure_source_baseline(schema="dbo", engine=None, watermark_states=None):
+def measure_source_baseline(schema="dbo", engine=None, watermark_states=None, batch_time=None):
     logger.info("=== [CƠ CHẾ 1 - PRE-EXTRACT] BẮT ĐẦU ĐO ĐẠC THÔNG SỐ CHUẨN TỪ SOURCE ===")
     engine = engine or get_source_engine()
     watermark_states = watermark_states or {}
@@ -87,7 +87,7 @@ def measure_source_baseline(schema="dbo", engine=None, watermark_states=None):
             expected_row_count = row_counts.get(actual_name)
             if expected_row_count is None:
                 expected_row_count = conn.execute(
-                    text(f"SELECT COUNT(*) FROM [{schema}].[{actual_name}] WITH (NOLOCK)")
+                    text(f"SELECT COUNT(*) FROM [{schema}].[{actual_name}]")
                 ).scalar()
 
             expected_extract_rows = expected_row_count
@@ -101,6 +101,7 @@ def measure_source_baseline(schema="dbo", engine=None, watermark_states=None):
                     schema=schema,
                     include_order_by=False,
                     resolved_columns=resolved_cols,
+                    batch_time=batch_time,
                 )
                 if dyn_query:
                     expected_extract_rows = conn.execute(

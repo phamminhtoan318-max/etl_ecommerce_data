@@ -88,30 +88,50 @@ def validate_staging_against_baseline(
 
             if logical_name in pipeline_stats:
                 loaded_rows = pipeline_stats[logical_name].get("loaded_rows", 0)
-                if loaded_rows != expected_extract_rows:
-                    diff = abs(loaded_rows - expected_extract_rows)
+                if strategy == "full" and loaded_rows != stg_rows:
+                    diff = abs(loaded_rows - stg_rows)
                     err = (
-                        f"[LỆCH SỐ DÒNG NẠP] Bảng '{logical_name}': Kỳ vọng trích xuất {expected_extract_rows:,} dòng "
-                        f"nhưng nạp vào Staging {loaded_rows:,} dòng (lệch {diff:,} dòng)!"
+                        f"[THẤT THOÁT DỮ LIỆU STAGING] Bảng '{logical_name}': Đã nạp {loaded_rows:,} dòng "
+                        f"nhưng Staging chỉ lưu {stg_rows:,} dòng (lệch {diff:,} dòng)!"
                     )
                     errors.append(err)
                     logger.error(err)
 
-            if strategy == "full" and stg_rows != expected_source_rows:
-                diff = abs(stg_rows - expected_source_rows)
-                err = (
-                    f"[LỆCH SỐ DÒNG STAGING] Bảng '{logical_name}': Source nguồn có {expected_source_rows:,} dòng "
-                    f"nhưng Staging Target có {stg_rows:,} dòng (lệch {diff:,} dòng)!"
-                )
-                errors.append(err)
-                logger.error(err)
-            elif strategy != "full" and stg_rows < expected_extract_rows:
-                err = (
-                    f"[THIẾU DÒNG INCREMENTAL] Bảng '{logical_name}': Staging có {stg_rows:,} dòng, "
-                    f"nhỏ hơn số dòng kỳ vọng của batch ({expected_extract_rows:,} dòng)!"
-                )
-                errors.append(err)
-                logger.error(err)
+            if strategy == "full":
+                if stg_rows < expected_source_rows:
+                    diff = expected_source_rows - stg_rows
+                    err = (
+                        f"[THIẾU DÒNG NGUỒN] Bảng '{logical_name}': Nguồn ban đầu có {expected_source_rows:,} dòng "
+                        f"nhưng Staging chỉ nạp {stg_rows:,} dòng (hụt {diff:,} dòng)!"
+                    )
+                    errors.append(err)
+                    logger.error(err)
+                elif stg_rows > expected_source_rows:
+                    diff = stg_rows - expected_source_rows
+                    logger.info(
+                        f"[NGUỒN TĂNG TRƯỞNG] Bảng '{logical_name}': Phát sinh thêm {diff:,} dòng mới "
+                        f"(từ {expected_source_rows:,} lên {stg_rows:,} dòng)."
+                    )
+                else:
+                    logger.info(f"[KHỚP SỐ DÒNG] Bảng '{logical_name}': Khớp 100% ({stg_rows:,} dòng).")
+            elif strategy != "full":
+                loaded_rows = pipeline_stats.get(logical_name, {}).get("loaded_rows", 0)
+                if loaded_rows < expected_extract_rows:
+                    diff = expected_extract_rows - loaded_rows
+                    err = (
+                        f"[THIẾU DÒNG INCREMENTAL] Bảng '{logical_name}': Kỳ vọng {expected_extract_rows:,} dòng "
+                        f"nhưng chỉ nạp được {loaded_rows:,} dòng (hụt {diff:,} dòng)!"
+                    )
+                    errors.append(err)
+                    logger.error(err)
+                elif loaded_rows > expected_extract_rows:
+                    diff = loaded_rows - expected_extract_rows
+                    logger.info(
+                        f"[INCREMENTAL TĂNG TRƯỞNG] Bảng '{logical_name}': Phát sinh thêm {diff:,} dòng mới "
+                        f"trong batch ({expected_extract_rows:,} -> {loaded_rows:,} dòng)."
+                    )
+                else:
+                    logger.info(f"[KHỚP SỐ DÒNG] Bảng '{logical_name}': Khớp 100% ({loaded_rows:,} dòng).")
 
             stg_cols = {c["name"] for c in inspector.get_columns(tbl_name, schema=tgt_schema)}
             expected_cols = set(base_info.get("expected_columns", [])) | {"_extracted_at", "_batch_id"}

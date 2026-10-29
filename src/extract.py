@@ -31,6 +31,7 @@ def build_dynamic_query(
     schema="dbo",
     include_order_by=True,
     resolved_columns=None,
+    batch_time=None,
 ):
     strategy = rule.get("strategy")
     if not strategy:
@@ -51,9 +52,13 @@ def build_dynamic_query(
         else:
             cols_str = "*"
 
-    base_query = f"SELECT {cols_str} FROM [{schema}].[{sql_table_name}] WITH (NOLOCK)"
+    base_query = f"SELECT {cols_str} FROM [{schema}].[{sql_table_name}]"
     col = rule.get("watermark_column")
     where_filter = ""
+    cutoff_filter = ""
+    if batch_time and col:
+        cutoff = batch_time.strftime("%Y-%m-%d %H:%M:%S") if isinstance(batch_time, datetime) else str(batch_time)[:19]
+        cutoff_filter = f" AND [{col}] <= '{cutoff}'"
 
     if strategy == "full":
         logger.info(f"[{logical_name}] Chế độ trích xuất: FULL")
@@ -75,8 +80,8 @@ def build_dynamic_query(
             )
             return None
 
-        where_filter = f"{col} > '{mark}'"
-        logger.info(f"[{logical_name}] Chế độ trích xuất: WATERMARK ({col} > '{mark}')")
+        where_filter = f"[{col}] > '{mark}'{cutoff_filter}"
+        logger.info(f"[{logical_name}] Chế độ trích xuất: WATERMARK ({where_filter})")
 
     elif strategy == "lookback_window":
         if not col:
@@ -105,8 +110,8 @@ def build_dynamic_query(
         try:
             dt = datetime.fromisoformat(str(mark)[:19])
             adjusted_mark = (dt - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-            where_filter = f"{col} > '{adjusted_mark}'"
-            logger.info(f"[{logical_name}] Chế độ trích xuất: LOOKBACK ({days} ngày lùi: {col} > '{adjusted_mark}')")
+            where_filter = f"[{col}] > '{adjusted_mark}'{cutoff_filter}"
+            logger.info(f"[{logical_name}] Chế độ trích xuất: LOOKBACK ({where_filter})")
         except Exception as e:
             logger.error(
                 f"[{logical_name}] LỖI LOOKBACK: Không parse được mốc thời gian '{mark}' ({e})! "
@@ -232,6 +237,7 @@ def extract_from_sqlserver(schema="dbo", batch_time=None, watermark_states=None)
                 last_watermark=last_wm,
                 schema=schema,
                 resolved_columns=resolved_columns,
+                batch_time=batch_time,
             )
             if not query_str:
                 logger.warning(f"⏩ [BỎ QUA BẢNG] '{logical_name}' bị hủy do lỗi cơ chế/cancel. Tiếp tục các bảng khác...")

@@ -89,7 +89,7 @@ def main():
                         except Exception as e:
                             logger.debug(f"[SCHEMA SWAP] Chưa thể sao chép dữ liệu cơ sở bảng '{tbl}': {e}")
 
-        source_baseline = measure_source_baseline(watermark_states=watermark_states)
+        source_baseline = measure_source_baseline(watermark_states=watermark_states, batch_time=batch_time)
 
         for logical_name, actual_name, rule, chunk_stream in extract_from_sqlserver(
             batch_time=batch_time, watermark_states=watermark_states
