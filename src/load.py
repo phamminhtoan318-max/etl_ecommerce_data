@@ -5,6 +5,7 @@ import pandas as pd
 from sqlalchemy import text
 from src.config.config import EXTRACT_PIPELINE_RULES, STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
 from src.logger import get_logger
+from src.schema_contract import sync_target_schema_evolution
 
 logger = get_logger(__name__)
 
@@ -47,26 +48,29 @@ def init_staging_tables(tgt_engine, ddl_path=STAGING_DDL_SQL_PATH, tgt_schema=TG
 
 def get_watermark_states(tgt_engine, tgt_schema=TGT_DB_SCHEMA) -> dict:
     watermark_states = {}
-    with tgt_engine.connect() as conn:
-        rows = conn.execute(
-            text(f'SELECT logical_name, last_watermark FROM "{tgt_schema}"."_etl_watermarks";')
-        ).fetchall()
-        for row in rows:
-            mapping = dict(row._mapping)
-            if mapping.get("last_watermark") is not None:
-                watermark_states[mapping["logical_name"]] = str(mapping["last_watermark"])[:19]
+    try:
+        with tgt_engine.connect() as conn:
+            rows = conn.execute(
+                text(f'SELECT logical_name, last_watermark FROM "{tgt_schema}"."_etl_watermarks";')
+            ).fetchall()
+            for row in rows:
+                mapping = dict(row._mapping)
+                if mapping.get("last_watermark") is not None:
+                    watermark_states[mapping["logical_name"]] = str(mapping["last_watermark"])[:19]
 
-        for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
-            wm_col = rule.get("watermark_column")
-            target_table = rule.get("target_table")
-            if not wm_col or not target_table or logical_name in watermark_states:
-                continue
+            for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
+                wm_col = rule.get("watermark_column")
+                target_table = rule.get("target_table")
+                if not wm_col or not target_table or logical_name in watermark_states:
+                    continue
 
-            max_val = conn.execute(
-                text(f'SELECT MAX("{wm_col}") FROM "{tgt_schema}"."{target_table}";')
-            ).scalar()
-            if max_val is not None:
-                watermark_states[logical_name] = str(max_val)[:19]
+                max_val = conn.execute(
+                    text(f'SELECT MAX("{wm_col}") FROM "{tgt_schema}"."{target_table}";')
+                ).scalar()
+                if max_val is not None:
+                    watermark_states[logical_name] = str(max_val)[:19]
+    except Exception as e:
+        logger.debug(f"[WATERMARK STATE] Chưa thể đọc mốc watermark từ '{tgt_schema}' ({e}) -> Sẽ dùng mốc mặc định.")
 
     if watermark_states:
         logger.info(f"[WATERMARK STATE] Đã đọc mốc watermark từ Target DB: {watermark_states}")
@@ -277,6 +281,17 @@ def load_single_table(logical_name, actual_name, rule, chunk_stream, tgt_engine,
 
     logger.info(f"[PIPELINE] Bắt đầu nạp {logical_name} (nguồn: {actual_name}) -> {tgt_schema}.{target_table}")
     try:
+        rule = rule or {}
+        if rule.get("resolved_columns"):
+            cols_to_sync = list(rule["resolved_columns"]) + ["_extracted_at", "_batch_id"]
+            sync_target_schema_evolution(
+                tgt_engine=tgt_engine,
+                tgt_schema=tgt_schema,
+                target_table=target_table,
+                chunk_columns=cols_to_sync,
+                source_columns_meta=rule.get("source_columns"),
+            )
+
         loaded_rows = stream_load_table_to_postgres(
             chunk_stream=chunk_stream,
             table_name=target_table,

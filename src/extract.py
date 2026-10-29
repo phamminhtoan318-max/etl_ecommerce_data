@@ -6,6 +6,11 @@ from sqlalchemy import inspect, text
 from src.config.config import BASE_DIR, EXTRACT_PIPELINE_RULES, OLIST_7_TABLES
 from src.database import get_source_engine
 from src.logger import get_logger
+from src.schema_contract import (
+    SchemaValidationError,
+    parse_columns_config,
+    resolve_and_validate_columns,
+)
 
 logger = get_logger(__name__)
 
@@ -18,7 +23,15 @@ def resolve_table_name(db_tables, candidates):
     return None
 
 
-def build_dynamic_query(logical_name, sql_table_name, rule, last_watermark=None, schema="dbo", include_order_by=True):
+def build_dynamic_query(
+    logical_name,
+    sql_table_name,
+    rule,
+    last_watermark=None,
+    schema="dbo",
+    include_order_by=True,
+    resolved_columns=None,
+):
     strategy = rule.get("strategy")
     if not strategy:
         logger.error(f"[{logical_name}] LỖI CẤU HÌNH: Thiếu 'strategy' trong YAML! -> HỦY trích xuất bảng này.")
@@ -29,18 +42,14 @@ def build_dynamic_query(logical_name, sql_table_name, rule, last_watermark=None,
         logger.warning(f"[{logical_name}] Chế độ trích xuất là 'CANCEL' -> Hủy trích xuất bảng này.")
         return None
 
-    cols = rule.get("columns")
-    if not cols:
-        logger.error(f"[{logical_name}] LỖI CẤU HÌNH: Thiếu 'columns' trong YAML! -> HỦY trích xuất bảng này.")
-        return None
-
-    if isinstance(cols, list):
-        cols_str = ", ".join(f"[{c.strip()}]" for c in cols)
-    elif str(cols).strip() == "*":
-        cols_str = "*"
+    if resolved_columns:
+        cols_str = ", ".join(f"[{c.strip()}]" for c in resolved_columns)
     else:
-        logger.error(f"[{logical_name}] LỖI CẤU HÌNH: 'columns' phải là '*' hoặc danh sách cột! -> HỦY trích xuất bảng này.")
-        return None
+        mode, col_list = parse_columns_config(rule)
+        if mode == "selected" and col_list:
+            cols_str = ", ".join(f"[{c.strip()}]" for c in col_list)
+        else:
+            cols_str = "*"
 
     base_query = f"SELECT {cols_str} FROM [{schema}].[{sql_table_name}] WITH (NOLOCK)"
     col = rule.get("watermark_column")
@@ -197,15 +206,33 @@ def extract_from_sqlserver(schema="dbo", batch_time=None, watermark_states=None)
         for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
             actual_name = resolve_table_name(existing_tables, rule["candidates"])
             if not actual_name:
-                logger.error(
+                msg = (
                     f"[THIẾU BẢNG NGUỒN] Không tìm thấy bảng '{logical_name}' trên SQL Server. "
-                    f"Các bảng hiện có: {sorted(existing_tables)} -> Bỏ qua bảng này."
+                    f"Các bảng hiện có: {sorted(existing_tables)} -> Dừng pipeline có kiểm soát."
                 )
-                continue
+                logger.error(msg)
+                raise SchemaValidationError(msg)
+
+            source_columns = inspector.get_columns(actual_name, schema=schema)
+            resolved_columns, mode = resolve_and_validate_columns(
+                logical_name=logical_name,
+                actual_table_name=actual_name,
+                rule=rule,
+                source_columns=source_columns,
+            )
+            rule["resolved_columns"] = resolved_columns
+            rule["source_columns"] = source_columns
 
             last_wm = watermark_states.get(logical_name)
 
-            query_str = build_dynamic_query(logical_name, actual_name, rule, last_wm, schema=schema)
+            query_str = build_dynamic_query(
+                logical_name,
+                actual_name,
+                rule,
+                last_watermark=last_wm,
+                schema=schema,
+                resolved_columns=resolved_columns,
+            )
             if not query_str:
                 logger.warning(f"⏩ [BỎ QUA BẢNG] '{logical_name}' bị hủy do lỗi cơ chế/cancel. Tiếp tục các bảng khác...")
                 continue

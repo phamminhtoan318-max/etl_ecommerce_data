@@ -1,3 +1,27 @@
+# ==================================================================================================
+# CẤU HÌNH TRÍCH XUẤT DỮ LIỆU ETL (EXTRACT PIPELINE RULES)
+# --------------------------------------------------------------------------------------------------
+# THIẾT KẾ 3 CHẾ ĐỘ LẤY CỘT (COLUMN EXTRACTION MODES):
+# 1. all:      Lấy tất cả cột của bảng nguồn (Khi muốn lấy toàn bộ dữ liệu).
+#              Cú pháp:
+#                columns:
+#                  mode: all
+#
+# 2. selected: Chỉ lấy các cột được chỉ định (Khi chỉ cần một số cột).
+#              Cú pháp:
+#                columns:
+#                  mode: selected
+#                  list:
+#                    - column_name_1
+#                    - column_name_2
+#
+# 3. exclude:  Lấy tất cả trừ những cột không muốn lấy (Khi muốn bỏ một vài cột).
+#              Cú pháp:
+#                columns:
+#                  mode: exclude
+#                  list:
+#                    - unwanted_column_1
+# ==================================================================================================
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 1: CUSTOMERS (Khách hàng)
@@ -10,7 +34,8 @@ customers:
     - customers
   primary_keys:
     - customer_id
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 50000
 
 # --------------------------------------------------------------------------------------------------
@@ -26,7 +51,8 @@ orders:
     - order_id
   watermark_column: order_purchase_timestamp
   default_start_watermark: "2016-01-01 00:00:00"
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 25000
 
 # --------------------------------------------------------------------------------------------------
@@ -44,7 +70,8 @@ order_reviews:
   watermark_column: review_creation_date
   lookback_days: 3
   default_start_watermark: "2016-01-01 00:00:00"
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 25000
 
 # --------------------------------------------------------------------------------------------------
@@ -59,9 +86,8 @@ order_payments:
   primary_keys:
     - order_id
     - payment_sequential
-  start_date: "2017-01-01"
-  end_date: "2017-07-01"
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 50000
 
 # --------------------------------------------------------------------------------------------------
@@ -76,7 +102,8 @@ order_items:
   primary_keys:
     - order_id
     - order_item_id
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 50000
 
 # --------------------------------------------------------------------------------------------------
@@ -90,7 +117,8 @@ products:
     - products
   primary_keys:
     - product_id
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 50000
 
 # --------------------------------------------------------------------------------------------------
@@ -104,5 +132,6 @@ sellers:
     - sellers
   primary_keys:
     - seller_id
-  columns: "*"
+  columns:
+    mode: all
   chunksize: 50000

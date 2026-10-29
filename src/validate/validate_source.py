@@ -6,6 +6,7 @@ from src.config.config import (
 from src.database import get_source_engine
 from src.extract import OLIST_7_TABLES, build_dynamic_query, resolve_table_name
 from src.logger import get_logger
+from src.schema_contract import resolve_and_validate_columns
 
 logger = get_logger(__name__)
 
@@ -73,7 +74,16 @@ def measure_source_baseline(schema="dbo", engine=None, watermark_states=None):
             if not actual_name:
                 raise ValueError(f"Không tìm thấy bảng '{logical_name}' trên SQL Server!")
 
-            source_cols = [c["name"] for c in inspector.get_columns(actual_name, schema=schema)]
+            source_columns_meta = inspector.get_columns(actual_name, schema=schema)
+            source_cols = [c["name"] for c in source_columns_meta]
+            resolved_cols, col_mode = resolve_and_validate_columns(
+                logical_name=logical_name,
+                actual_table_name=actual_name,
+                rule=rule,
+                source_columns=source_columns_meta,
+            )
+            expected_columns = list(resolved_cols)
+
             expected_row_count = row_counts.get(actual_name)
             if expected_row_count is None:
                 expected_row_count = conn.execute(
@@ -84,20 +94,18 @@ def measure_source_baseline(schema="dbo", engine=None, watermark_states=None):
             if strategy != "full":
                 last_wm = watermark_states.get(logical_name)
                 dyn_query = build_dynamic_query(
-                    logical_name, actual_name, rule, last_watermark=last_wm, schema=schema, include_order_by=False
+                    logical_name,
+                    actual_name,
+                    rule,
+                    last_watermark=last_wm,
+                    schema=schema,
+                    include_order_by=False,
+                    resolved_columns=resolved_cols,
                 )
                 if dyn_query:
                     expected_extract_rows = conn.execute(
                         text(f"SELECT COUNT(*) FROM ({dyn_query}) AS _sub")
                     ).scalar()
-
-            configured_cols = rule.get("columns", "*")
-            if configured_cols == "*" or not configured_cols:
-                expected_columns = list(source_cols)
-            elif isinstance(configured_cols, list):
-                expected_columns = list(configured_cols)
-            else:
-                expected_columns = list(source_cols)
 
             expected_col_count = len(expected_columns) + 2
 
