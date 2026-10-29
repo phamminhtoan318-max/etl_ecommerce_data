@@ -36,9 +36,15 @@ src_auth = (
     else f"UID={SRC_DB_USER};PWD={SRC_DB_PASSWORD};"
 )
 
+src_server_target = (
+    f"{SRC_DB_SERVER},{str(SRC_DB_PORT).strip()}"
+    if SRC_DB_PORT and str(SRC_DB_PORT).strip()
+    else SRC_DB_SERVER
+)
+
 SRC_DB_CONNECTION_STRING = (
     f"DRIVER={{{SRC_DB_DRIVER}}};"
-    f"SERVER={SRC_DB_SERVER},{SRC_DB_PORT};"
+    f"SERVER={src_server_target};"
     f"DATABASE={SRC_DB_NAME};"
     f"{src_auth}"
     f"TrustServerCertificate={SRC_DB_TRUST_SERVER_CERTIFICATE};"
