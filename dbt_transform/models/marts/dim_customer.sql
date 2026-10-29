@@ -45,7 +45,7 @@ scd_changes as (
         purchased_at as valid_from
     from location_mapped
     where prev_location_key is null
-       or prev_location_key != location_key
+       or prev_location_key is distinct from location_key
 ),
 
 scd_calculated as (

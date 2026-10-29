@@ -1,0 +1,233 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: "Dữ liệu khách hàng đã được chuẩn hóa từ nguồn olist_customers_dataset"
+    columns:
+      - name: customer_id
+        description: "Khóa chính đại diện cho từng phiên mua hàng của khách hàng"
+        tests:
+          - unique
+          - not_null
+      - name: customer_unique_id
+        description: "Định danh duy nhất thực tế của khách hàng (dùng để tracking SCD)"
+        tests:
+          - not_null
+      - name: customer_zip_code
+        description: "Mã bưu chính của khách hàng"
+      - name: customer_city
+        description: "Thành phố của khách hàng (đã chuẩn hóa lowercase)"
+        tests:
+          - not_null
+      - name: customer_state
+        description: "Bang của khách hàng (đã chuẩn hóa uppercase)"
+        tests:
+          - not_null
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null
+
+  - name: stg_orders
+    description: "Dữ liệu đơn hàng đã được chuẩn hóa từ nguồn olist_orders_dataset"
+    columns:
+      - name: order_id
+        description: "Khóa chính duy nhất của đơn hàng"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Mã khách hàng thực hiện đơn hàng"
+        tests:
+          - not_null
+      - name: order_status
+        description: "Trạng thái hiện tại của đơn hàng"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['delivered', 'shipped', 'canceled', 'invoiced', 'processing', 'created', 'approved', 'unavailable']
+      - name: purchased_at
+        description: "Thời điểm khách hàng bấm đặt mua hàng"
+        tests:
+          - not_null
+      - name: approved_at
+        description: "Thời điểm thanh toán được phê duyệt"
+      - name: delivered_to_carrier_at
+        description: "Thời điểm đơn hàng được bàn giao cho đơn vị vận chuyển"
+      - name: delivered_to_customer_at
+        description: "Thời điểm khách hàng nhận được đơn hàng"
+      - name: estimated_delivery_at
+        description: "Thời điểm dự kiến giao hàng ban đầu"
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null
+
+  - name: stg_order_items
+    description: "Chi tiết các sản phẩm trong từng đơn hàng từ nguồn olist_order_items_dataset"
+    tests:
+      - unique_combination:
+          arguments:
+            combination_of_columns:
+              - order_id
+              - order_item_id
+    columns:
+      - name: order_id
+        description: "Mã đơn hàng"
+        tests:
+          - not_null
+      - name: order_item_id
+        description: "Số thứ tự mặt hàng trong đơn"
+        tests:
+          - not_null
+      - name: product_id
+        description: "Mã sản phẩm"
+        tests:
+          - not_null
+      - name: seller_id
+        description: "Mã người bán"
+        tests:
+          - not_null
+      - name: shipping_limit_at
+        description: "Hạn chót người bán phải gửi hàng cho bưu cục"
+      - name: item_price
+        description: "Giá niêm yết của sản phẩm (decimal)"
+        tests:
+          - not_null
+      - name: freight_value
+        description: "Phí vận chuyển cho từng món hàng (decimal)"
+        tests:
+          - not_null
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null
+
+  - name: stg_order_payments
+    description: "Thông tin thanh toán của các đơn hàng từ nguồn olist_order_payments_dataset"
+    tests:
+      - unique_combination:
+          arguments:
+            combination_of_columns:
+              - order_id
+              - payment_sequential
+    columns:
+      - name: order_id
+        description: "Mã đơn hàng"
+        tests:
+          - not_null
+      - name: payment_sequential
+        description: "Thứ tự các đợt thanh toán của đơn hàng"
+        tests:
+          - not_null
+      - name: payment_type
+        description: "Phương thức thanh toán đã chuẩn hóa lowercase"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['credit_card', 'boleto', 'voucher', 'debit_card', 'not_defined']
+      - name: payment_installments
+        description: "Số kỳ trả góp"
+        tests:
+          - not_null
+      - name: payment_value
+        description: "Số tiền thanh toán thực tế (decimal)"
+        tests:
+          - not_null
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null
+
+  - name: stg_order_reviews
+    description: "Đánh giá và phản hồi của khách hàng về đơn hàng từ nguồn olist_order_reviews_dataset"
+    tests:
+      - unique_combination:
+          arguments:
+            combination_of_columns:
+              - review_id
+              - order_id
+    columns:
+      - name: review_id
+        description: "Mã đánh giá phản hồi"
+        tests:
+          - not_null
+      - name: order_id
+        description: "Mã đơn hàng được đánh giá"
+        tests:
+          - not_null
+      - name: review_score
+        description: "Điểm đánh giá từ 1 đến 5 sao"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+      - name: review_comment_title
+        description: "Tiêu đề bình luận đánh giá"
+      - name: review_comment_message
+        description: "Nội dung bình luận đánh giá"
+      - name: review_creation_date
+        description: "Ngày gửi form khảo sát cho khách hàng"
+        tests:
+          - not_null
+      - name: review_answer_timestamp
+        description: "Thời điểm khách hàng gửi câu trả lời đánh giá"
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null
+
+  - name: stg_products
+    description: "Thông tin danh mục và quy cách sản phẩm từ nguồn olist_products_dataset"
+    columns:
+      - name: product_id
+        description: "Khóa chính định danh duy nhất của sản phẩm"
+        tests:
+          - unique
+          - not_null
+      - name: product_category_name
+        description: "Tên ngành hàng/danh mục sản phẩm"
+      - name: product_name_length
+        description: "Độ dài tiêu đề sản phẩm"
+      - name: product_description_length
+        description: "Độ dài mô tả sản phẩm"
+      - name: product_photos_quantity
+        description: "Số lượng ảnh của sản phẩm"
+      - name: product_weight_g
+        description: "Trọng lượng sản phẩm (gram)"
+      - name: product_length_cm
+        description: "Chiều dài bao gói sản phẩm (cm)"
+      - name: product_height_cm
+        description: "Chiều cao bao gói sản phẩm (cm)"
+      - name: product_width_cm
+        description: "Chiều rộng bao gói sản phẩm (cm)"
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null
+
+  - name: stg_sellers
+    description: "Thông tin người bán hàng từ nguồn olist_sellers_dataset"
+    columns:
+      - name: seller_id
+        description: "Khóa chính định danh duy nhất của người bán"
+        tests:
+          - unique
+          - not_null
+      - name: seller_zip_code
+        description: "Mã bưu chính của người bán"
+      - name: seller_city
+        description: "Thành phố của người bán (chuẩn hóa lowercase)"
+        tests:
+          - not_null
+      - name: seller_state
+        description: "Bang của người bán (chuẩn hóa uppercase)"
+        tests:
+          - not_null
+      - name: _extracted_at
+        description: "Thời điểm trích xuất dữ liệu từ nguồn"
+        tests:
+          - not_null

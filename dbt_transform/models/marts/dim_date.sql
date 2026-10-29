@@ -1,8 +1,8 @@
 with date_series as (
     select 
         generate_series(
-            '2016-01-01'::date, 
-            '2020-12-31'::date, 
+            '2015-01-01'::date, 
+            '2030-12-31'::date, 
             '1 day'::interval
         )::date as full_date
 )
@@ -13,8 +13,8 @@ select
     extract(year from full_date)::integer as year,
     extract(quarter from full_date)::integer as quarter,
     extract(month from full_date)::integer as month,
-    trim(to_char(full_date, 'Month'))::varchar as month_name,
-    trim(to_char(full_date, 'Day'))::varchar as day_of_week_name,
+    trim(to_char(full_date, 'FMMonth'))::varchar as month_name,
+    trim(to_char(full_date, 'FMDay'))::varchar as day_of_week_name,
     case 
         when extract(isodow from full_date) in (6, 7) then true 
         else false 

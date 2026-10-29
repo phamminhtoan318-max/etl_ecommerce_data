@@ -20,7 +20,7 @@ items_agg as (
 payments_agg as (
     select
         order_id,
-        (array_agg(payment_type order by payment_value desc))[1] as payment_type,
+        (array_agg(payment_type order by payment_value desc, payment_type asc, payment_sequential asc))[1] as payment_type,
         sum(payment_value)::decimal(10, 2) as total_payment_value
     from {{ ref('stg_order_payments') }}
     group by order_id
