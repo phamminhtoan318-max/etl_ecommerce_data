@@ -6,11 +6,7 @@ from sqlalchemy import text
 from src.checkpoint import get_watermark_states, upsert_watermark_state
 from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
 from src.logger import get_logger
-from src.schema import (
-    ensure_staging_primary_keys,
-    init_staging_tables,
-    sync_target_schema_evolution,
-)
+from src.schema import sync_target_schema_evolution
 
 logger = get_logger(__name__)
 
@@ -43,13 +39,13 @@ def _psql_copy_method(table, conn, keys, data_iter):
 
 def stream_load_table_to_postgres(
     chunk_stream,
-    table_name: str,
-    strategy: str,
+    table_name,
+    strategy,
     tgt_engine,
-    tgt_schema: str = TGT_DB_SCHEMA,
-    logical_name: str = None,
-    rule: dict = None,
-) -> int:
+    tgt_schema=TGT_DB_SCHEMA,
+    logical_name=None,
+    rule=None,
+):
     total_rows = 0
     norm_strategy = str(strategy).lower().strip()
     rule = rule or {}
@@ -161,15 +157,11 @@ def stream_load_table_to_postgres(
                 committed_rows=total_rows,
                 last_checkpoint_wm=last_checkpoint_wm,
             ) from e
-                batch_idx=batch_idx,
-                committed_rows=total_rows,
-                last_checkpoint_wm=last_checkpoint_wm,
-            ) from e
 
     return total_rows
 
 
-def load_single_table(logical_name: str, actual_name: str, rule: dict, chunk_stream, tgt_engine, tgt_schema: str = TGT_DB_SCHEMA) -> dict:
+def load_single_table(logical_name, actual_name, rule, chunk_stream, tgt_engine, tgt_schema=TGT_DB_SCHEMA):
     target_table = rule.get("target_table") or actual_name
     strategy = rule.get("strategy", "cancel")
     t0 = time.time()
