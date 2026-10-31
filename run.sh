@@ -17,7 +17,7 @@ if [ -f ".env" ]; then
     done < .env
 fi
 
-export DBT_LOG_PATH="../logs"
+export PIPELINE_LOG_PATH="../logs"
 
 if [ -f ".venv/Scripts/python.exe" ]; then
     PYTHON="$PWD/.venv/Scripts/python.exe"

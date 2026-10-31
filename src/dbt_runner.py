@@ -94,7 +94,13 @@ def run_dbt_command(command_args, stage_prefix, stage_label):
     start_time = time.time()
     logger.info(f"🚀 [{stage_prefix}] Bắt đầu thực thi: {stage_label}...")
 
-    cmd = [sys.executable, "-m", "dbt.cli.main"] + command_args
+    cmd = [
+        sys.executable,
+        "-m",
+        "dbt.cli.main",
+        "--log-level-file",
+        "none",
+    ] + command_args
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -171,3 +177,4 @@ if __name__ == "__main__":
         run_dbt_test()
     else:
         run_dbt_all()
+
