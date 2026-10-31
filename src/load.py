@@ -15,14 +15,11 @@ from src.schema import (
 
 logger = get_logger(__name__)
 
-# Re-exports để đảm bảo tính tương thích ngược hoàn toàn
 _clean_and_dedup_chunk = clean_and_dedup_chunk
 _upsert_watermark_state = upsert_watermark_state
 
 
 class ChunkLoadError(Exception):
-    """Báo hiệu lỗi xảy ra tại một chunk cụ thể trong quá trình nạp dữ liệu theo batch."""
-
     def __init__(self, original_error, batch_idx, committed_rows, last_checkpoint_wm):
         super().__init__(str(original_error))
         self.original_error = original_error
@@ -32,7 +29,6 @@ class ChunkLoadError(Exception):
 
 
 def _psql_copy_method(table, conn, keys, data_iter):
-    """Sử dụng PostgreSQL COPY qua StringIO để nạp dữ liệu đạt tốc độ tối đa."""
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
         s_buf = io.StringIO()
@@ -56,7 +52,6 @@ def stream_load_table_to_postgres(
     logical_name: str = None,
     rule: dict = None,
 ) -> int:
-    """Nạp stream các DataFrame chunks vào bảng đích PostgreSQL (hỗ trợ Full Truncate & Incremental Checkpoint)."""
     total_rows = 0
     norm_strategy = str(strategy).lower().strip()
     rule = rule or {}
@@ -207,7 +202,6 @@ def stream_load_table_to_postgres(
 
 
 def load_single_table(logical_name: str, actual_name: str, rule: dict, chunk_stream, tgt_engine, tgt_schema: str = TGT_DB_SCHEMA) -> dict:
-    """Nạp dữ liệu cho một bảng đơn lẻ: đồng bộ schema evolution, nạp chunks và bắt lỗi checkpoint."""
     target_table = rule.get("target_table") or actual_name
     strategy = rule.get("strategy", "cancel")
     t0 = time.time()
