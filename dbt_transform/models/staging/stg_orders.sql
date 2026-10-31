@@ -1,8 +1,8 @@
 with source as (
-    select * from {{ source('staging', 'olist_orders_dataset') }}
+    select * from {{ source('bronze', 'olist_orders_dataset') }}
 ),
 
-renamed as (
+deduped as (
     select
         order_id,
         customer_id,
@@ -12,8 +12,26 @@ renamed as (
         order_delivered_carrier_date as delivered_to_carrier_at,
         order_delivered_customer_date as delivered_to_customer_at,
         order_estimated_delivery_date as estimated_delivery_at,
-        _extracted_at
+        _batch_id,
+        _extracted_at,
+        row_number() over (
+            partition by order_id 
+            order by _extracted_at desc, _batch_id desc
+        ) as _row_num
     from source
+    where order_id is not null
 )
 
-select * from renamed
+select
+    order_id,
+    customer_id,
+    order_status,
+    purchased_at,
+    approved_at,
+    delivered_to_carrier_at,
+    delivered_to_customer_at,
+    estimated_delivery_at,
+    _batch_id,
+    _extracted_at
+from deduped
+where _row_num = 1

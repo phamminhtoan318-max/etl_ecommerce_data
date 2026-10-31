@@ -1,78 +1,21 @@
 version: 2
 
 sources:
-  - name: staging
-    schema: "{{ env_var('TGT_DB_SCHEMA', 'raw') }}"
+  - name: bronze
+    schema: "{{ env_var('TGT_DB_SCHEMA', 'bronze') }}"
+    description: "Tầng dữ liệu thô (Bronze Layer) được Python trích xuất nguyên bản 100% từ SQL Server"
     tables:
       - name: olist_customers_dataset
-        columns:
-          - name: customer_id
-            tests:
-              - unique
-              - not_null
-
+        description: "Bảng dữ liệu khách hàng thô"
       - name: olist_products_dataset
-        columns:
-          - name: product_id
-            tests:
-              - unique
-              - not_null
-
+        description: "Bảng dữ liệu danh mục sản phẩm thô"
       - name: olist_sellers_dataset
-        columns:
-          - name: seller_id
-            tests:
-              - unique
-              - not_null
-
+        description: "Bảng dữ liệu đối tác người bán thô"
       - name: olist_orders_dataset
-        columns:
-          - name: order_id
-            tests:
-              - unique
-              - not_null
-
+        description: "Bảng dữ liệu đơn hàng thô"
       - name: olist_order_items_dataset
-        tests:
-          - unique_combination:
-              arguments:
-                combination_of_columns:
-                  - order_id
-                  - order_item_id
-        columns:
-          - name: order_id
-            tests:
-              - not_null
-          - name: order_item_id
-            tests:
-              - not_null
-
+        description: "Bảng dữ liệu chi tiết mặt hàng trong đơn thô"
       - name: olist_order_payments_dataset
-        tests:
-          - unique_combination:
-              arguments:
-                combination_of_columns:
-                  - order_id
-                  - payment_sequential
-        columns:
-          - name: order_id
-            tests:
-              - not_null
-          - name: payment_sequential
-            tests:
-              - not_null
-
+        description: "Bảng dữ liệu thanh toán đơn hàng thô"
       - name: olist_order_reviews_dataset
-        tests:
-          - unique_combination:
-              arguments:
-                combination_of_columns:
-                  - review_id
-                  - order_id
-        columns:
-          - name: review_id
-            tests:
-              - not_null
-          - name: order_id
-            tests:
-              - not_null
+        description: "Bảng dữ liệu đánh giá đơn hàng thô"
