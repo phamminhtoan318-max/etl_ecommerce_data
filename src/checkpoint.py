@@ -6,7 +6,6 @@ logger = get_logger(__name__)
 
 
 def get_watermark_states(tgt_engine, tgt_schema: str = TGT_DB_SCHEMA) -> dict:
-    """Đọc các mốc watermark thời gian gần nhất của từng bảng từ cơ sở dữ liệu đích."""
     watermark_states = {}
     try:
         with tgt_engine.connect() as conn:
@@ -49,7 +48,6 @@ def upsert_watermark_state(
     batch_id: str = None,
     overwrite: bool = False,
 ):
-    """Cập nhật mốc watermark đã xử lý thành công (Idempotent Checkpoint) vào bảng _etl_watermarks."""
     if overwrite:
         watermark_update_clause = "last_watermark = EXCLUDED.last_watermark,"
     else:

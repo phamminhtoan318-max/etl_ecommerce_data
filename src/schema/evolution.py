@@ -6,7 +6,6 @@ logger = get_logger(__name__)
 
 
 def map_source_type_to_postgres(col_name, col_meta):
-    """Ánh xạ kiểu dữ liệu từ SQL Server sang kiểu dữ liệu tương thích nhất trong PostgreSQL."""
     if not col_meta:
         return "TEXT"
 
@@ -40,7 +39,6 @@ def map_source_type_to_postgres(col_name, col_meta):
 
 
 def sync_target_schema_evolution(tgt_engine, tgt_schema, target_table, chunk_columns, source_columns_meta=None):
-    """Tự động đồng bộ các cột mới phát sinh từ nguồn vào bảng đích trên PostgreSQL (Schema Evolution)."""
     tgt_inspector = inspect(tgt_engine)
     try:
         existing_tgt_cols = {c["name"].lower() for c in tgt_inspector.get_columns(target_table, schema=tgt_schema)}
@@ -77,7 +75,6 @@ def sync_target_schema_evolution(tgt_engine, tgt_schema, target_table, chunk_col
 
 
 def ensure_staging_primary_keys(tgt_engine, tgt_schema=TGT_DB_SCHEMA):
-    """Kiểm tra và tạo ràng buộc PRIMARY KEY (kèm Unique B-Tree Index) cho các bảng Staging nếu dữ liệu đạt chuẩn."""
     try:
         inspector = inspect(tgt_engine)
         existing_tables = set(inspector.get_table_names(schema=tgt_schema))

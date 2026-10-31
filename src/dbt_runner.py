@@ -17,11 +17,9 @@ def _format_and_log_dbt_line(line, stage_prefix):
     if not cleaned:
         return
 
-    # Bỏ qua các dòng banner mặc định
     if any(k in cleaned for k in ["Running with dbt=", "Registered adapter:", "Performance info:", "dbt v2 is available", "New project -", "Existing v1"]):
         return
 
-    # 1. Bắt dòng bắt đầu chạy model: "1 of 7 START sql table model silver.stg_customers ..."
     start_match = re.search(r"(\d+ of \d+)\s+START\s+(\w+)\s+(table|view|incremental)\s+model\s+([\w\.]+)", cleaned)
     if start_match:
         progress = start_match.group(1)
@@ -29,7 +27,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.info(f"[{stage_prefix}] ⏳ Đang xây dựng ({progress}): {model_name}...")
         return
 
-    # 2. Bắt dòng hoàn tất model thành công: "1 of 7 OK created sql table model silver.stg_customers ... [SELECT ... in 1.23s]"
     ok_match = re.search(r"(\d+ of \d+)\s+OK created\s+(\w+)\s+(table|view|incremental)\s+model\s+([\w\.]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if ok_match:
         progress = ok_match.group(1)
@@ -38,7 +35,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.info(f"[{stage_prefix}] ✅ Hoàn tất ({progress}): {model_name} [{perf}]")
         return
 
-    # 3. Bắt dòng model bị lỗi: "ERROR creating sql table model silver.stg_customers ... [ERROR in 1.23s]"
     err_match = re.search(r"(\d+ of \d+)?\s*ERROR creating.*?model\s+([\w\.]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if err_match:
         model_name = err_match.group(2)
@@ -46,7 +42,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.error(f"[{stage_prefix}] ❌ THẤT BẠI: {model_name} [{perf}]")
         return
 
-    # 4. Bắt dòng kiểm thử PASS: "1 of 50 PASS not_null_stg_customers_customer_id ... [PASS in 0.05s]"
     test_pass = re.search(r"(\d+ of \d+)\s+PASS\s+([\w_]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if test_pass:
         progress = test_pass.group(1)
@@ -55,7 +50,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.info(f"[{stage_prefix}] ✅ PASS ({progress}): {test_name} [{perf}]")
         return
 
-    # 5. Bắt dòng kiểm thử FAIL: "1 of 50 FAIL 1 not_null_stg_customers_customer_id ... [FAIL 1 in 0.05s]"
     test_fail = re.search(r"(\d+ of \d+)\s+FAIL\s+(\d+)\s+([\w_]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if test_fail:
         progress = test_fail.group(1)
@@ -65,7 +59,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.error(f"[{stage_prefix}] ❌ FAIL ({progress}): {test_name} - Phát hiện {fail_count} bản ghi vi phạm (Đã lưu vào schema test_failures) [{perf}]")
         return
 
-    # 6. Bắt dòng kiểm thử WARN
     test_warn = re.search(r"(\d+ of \d+)\s+WARN\s+(\d+)\s+([\w_]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if test_warn:
         progress = test_warn.group(1)
@@ -74,7 +67,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.warning(f"[{stage_prefix}] ⚠️ CẢNH BÁO ({progress}): {test_name} ({warn_count} dòng vi phạm)")
         return
 
-    # 7. Bắt dòng tổng kết: "Done. PASS=... WARN=... ERROR=... TOTAL=..."
     if "Done. PASS=" in cleaned:
         logger.info(f"[{stage_prefix}] 📋 TỔNG KẾT: {cleaned}")
         return
@@ -83,7 +75,6 @@ def _format_and_log_dbt_line(line, stage_prefix):
         logger.info(f"[{stage_prefix}] ✨ Thực thi hoàn tất thành công 100%!")
         return
 
-    # Các dòng log phụ trợ khác
     if any(k in cleaned for k in ["Concurrency:", "Found ", "Finished running"]):
         logger.debug(f"[{stage_prefix}] {cleaned}")
     elif "Database Error" in cleaned or "Compilation Error" in cleaned or "Runtime Error" in cleaned:
