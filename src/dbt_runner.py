@@ -98,6 +98,8 @@ def run_dbt_command(command_args, stage_prefix, stage_label):
         sys.executable,
         "-m",
         "dbt.cli.main",
+        "--log-path",
+        "../logs",
         "--log-level-file",
         "none",
     ] + command_args
