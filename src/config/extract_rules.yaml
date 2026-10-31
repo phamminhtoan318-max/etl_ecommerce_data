@@ -36,7 +36,7 @@ customers:
     - customer_id
   columns:
     mode: all
-  chunksize: 50000
+  chunksize: 5000
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 2: ORDERS (Đơn hàng)
@@ -53,7 +53,7 @@ orders:
   default_start_watermark: "2016-01-01 00:00:00"
   columns:
     mode: all
-  chunksize: 25000
+  chunksize: 2500
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 3: ORDER_REVIEWS (Đánh giá đơn hàng)
@@ -72,7 +72,7 @@ order_reviews:
   default_start_watermark: "2016-01-01 00:00:00"
   columns:
     mode: all
-  chunksize: 25000
+  chunksize: 2500
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 4: ORDER_PAYMENTS (Thanh toán đơn hàng)
@@ -88,7 +88,7 @@ order_payments:
     - payment_sequential
   columns:
     mode: all
-  chunksize: 50000
+  chunksize: 5000
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 5: ORDER_ITEMS (Chi tiết sản phẩm trong đơn)
@@ -104,7 +104,7 @@ order_items:
     - order_item_id
   columns:
     mode: all
-  chunksize: 50000
+  chunksize: 5000
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 6: PRODUCTS (Danh mục sản phẩm)
@@ -119,7 +119,7 @@ products:
     - product_id
   columns:
     mode: all
-  chunksize: 50000
+  chunksize: 5000
 
 # --------------------------------------------------------------------------------------------------
 # BẢNG 7: SELLERS (Người bán / Đối tác)
@@ -134,4 +134,4 @@ sellers:
     - seller_id
   columns:
     mode: all
-  chunksize: 50000
+  chunksize: 5000
