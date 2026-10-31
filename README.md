@@ -1,4 +1,4 @@
-# Olist E-Commerce Enterprise ELT Data Pipeline
+# Olist E-Commerce Enterprise Medallion Data Pipeline
 
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
@@ -6,19 +6,20 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![SQL Server](https://img.shields.io/badge/SQL_Server-2022-CC292B.svg?style=flat&logo=microsoftsqlserver&logoColor=white)](https://www.microsoft.com/sql-server)
 
-An enterprise-grade, end-to-end, production-ready ELT (Extract - Load - Transform) pipeline designed to ingest, validate, audit, and model over 100,000 real-world commercial transactions from Microsoft SQL Server (OLTP) into a PostgreSQL Data Warehouse, transformed into Kimball-standard Star Schema Data Marts using dbt Core.
+An enterprise-grade, end-to-end, production-ready **Medallion Data Pipeline (Bronze -> Silver -> Gold)** designed to ingest, validate, audit, and model over 100,000 real-world commercial transactions from Microsoft SQL Server (OLTP) into a PostgreSQL Data Warehouse, transformed into Kimball-standard Unified Star Schema Marts using dbt Core.
 
 ---
 
 ## 1. Project Overview
 
-This project delivers a resilient, fault-tolerant Data Engineering pipeline that bridges transactional operations and enterprise business intelligence. 
+This project delivers a resilient, fault-tolerant Data Engineering pipeline adopting the **Medallion Architecture** that bridges transactional operations and enterprise business intelligence. 
 
 ### Key Highlights:
-- **Zero-Downtime Atomic Swaps**: Blue-Green schema swapping (`raw_staging_tmp` -> `raw`) ensures downstream BI dashboards never query incomplete or empty staging tables during ingestion.
-- **Idempotent Ingestion & Checkpointing**: Chunk-based streaming (25,000 rows/batch) with transactional temporary staging and Primary Key UPSERT guarantees 100% duplicate-free data, even after mid-pipeline crashes.
-- **Strict Data Contracts & Schema Evolution**: Pre-flight validation safeguards against upstream column deletion or renaming, while automated schema evolution handles upstream column additions on the fly without breaking pipelines.
-- **Kimball Dimensional Modeling**: Modeled into a Star Schema comprising 2 Fact tables and 5 Dimensions, including Slowly Changing Dimensions (SCD Type 2) for historical customer tracking and deterministic array aggregation for order payment analysis.
+- **Pure Raw Bronze Ingestion**: Ingests 100% faithful raw data from SQL Server into PostgreSQL `bronze` without dropping rows or filtering on RAM. Automatically appends audit metadata (`_batch_id` and `_extracted_at`), enabling zero-touch replays when downstream logic changes.
+- **Zero-Downtime Atomic Swaps**: Blue-Green schema swapping (`bronze_staging_tmp` -> `bronze`) ensures downstream consumers and dbt transformations never query incomplete or empty staging tables during ingestion.
+- **SQL-Based Silver Deduplication & Cleaning**: Pushes data cleaning, type casting, string trimming, NULL PK filtering, and deduplication (`ROW_NUMBER() OVER (...)`) entirely into dbt SQL models inside PostgreSQL `silver`.
+- **Unified Gold Star Schema**: Consolidates all 5 Dimensions (including Slowly Changing Dimensions SCD Type 2 for customer relocation tracking) and 2 Fact tables into a single unified schema (`gold`), eliminating unnecessary mart fragmentation.
+- **Unified Logging Architecture**: Powered by `src/dbt_runner.py`, intercepts all real-time dbt model runs and test assertions, formatting them into consistent, human-readable logs persisted in a single rotation log file (`logs/pipeline.log`).
 - **Comprehensive Quality Assurance**: Over 100 automated data tests in dbt alongside a 2-tier pre/post-load baseline audit, storing any test failure records directly into a dedicated database audit schema (`test_failures`).
 
 ---
@@ -52,9 +53,9 @@ Olist operates the largest department store marketplace in Brazilian e-commerce,
 | **Programming Language** | Python | 3.11+ | Pipeline orchestration, data validation, streaming extraction |
 | **Database Connectors** | SQLAlchemy, pyodbc | 2.0+ / 5.0+ | Database engine abstraction and connection pooling |
 | **ODBC Driver** | Microsoft ODBC Driver | 18 for SQL Server | High-performance enterprise connectivity to SQL Server |
-| **Data Processing** | pandas | 2.2+ | In-memory batch chunking, fast hashing, RAM deduplication |
+| **Data Processing** | pandas | 2.2+ | In-memory batch chunking and generator streaming |
 | **Source Database (OLTP)** | Microsoft SQL Server | 2019/2022 | Production transactional relational database |
-| **Target Database (DWH)** | PostgreSQL | 16 | Relational staging layer and dimensional data warehouse |
+| **Target Database (DWH)** | PostgreSQL | 16 | Bronze raw store, Silver cleaned store, Gold Star Schema |
 | **Transformation & Modeling** | dbt Core (dbt-postgres) | 1.12.6 / 1.11.0 | ELT SQL transformations, lineage DAG, data quality tests |
 | **Containerization** | Docker & Docker Compose | Latest | Reproducible environments, cross-platform deployment |
 | **Operating System Support** | Windows 11 & Linux/macOS | - | Cross-platform execution with strict LF `.gitattributes` |
@@ -117,41 +118,44 @@ flowchart TD
         SS["SQL Server (OLTP)"]
     end
 
-    subgraph S2["2. Ingestion & Quality Guard"]
-        BC["Pre-flight Baseline & Contract Check<br/>(validate_source.py)"]
+    subgraph S2["2. Ingestion & Quality Guard (Python)"]
+        BC["Pre-flight Baseline & Contract Check<br/>(contract.py)"]
         EX["Chunked Streaming Generator<br/>(25,000 rows/batch, Cutoff Timestamp)"]
-        CL["In-Memory RAM Cleaning & Dedup<br/>(data_cleaner.py)"]
-        SE["Target Schema Evolution<br/>(schema_evolution.py)"]
+        META["Append Audit Lineage<br/>(_batch_id, _extracted_at)"]
+        SE["Target Schema Evolution<br/>(evolution.py)"]
         SS --> BC
         BC --> EX
-        EX --> CL
-        CL --> SE
+        EX --> META
+        META --> SE
     end
 
-    subgraph S3["3. PostgreSQL Data Warehouse Staging"]
-        TMP["Temporary Blue-Green Schema<br/>(raw_staging_tmp)"]
+    subgraph S3["3. PostgreSQL Bronze Layer (schema: bronze)"]
+        TMP["Blue-Green Draft Schema<br/>(bronze_staging_tmp)"]
         AUD["2-Tier Row Count Audit<br/>(validate_target.py)"]
-        SWP["Atomic 0.05s Schema Swap<br/>(schema_swap.py)"]
-        RAW["Authoritative Staging Schema<br/>(raw)"]
+        SWP["Atomic 0.05s Schema Swap<br/>(swap.py)"]
+        BRZ["Immutable Bronze Raw Store<br/>(bronze)"]
         SE --> TMP
         TMP --> AUD
         AUD --> SWP
-        SWP --> RAW
+        SWP --> BRZ
     end
 
-    subgraph S4["4. dbt Transformation Layer"]
-        STG["Staging Views (schema: stg)<br/>stg_orders, stg_customers..."]
-        MRT["Dimensional Star Schema (schema: marts)<br/>dim_customer (SCD2), dim_date, fact_orders..."]
-        TST["Audit Failure Schema (schema: test_failures)<br/>100+ Automated Tests"]
-        RAW --> STG
-        STG --> MRT
-        STG -.-> TST
-        MRT -.-> TST
+    subgraph S4["4. dbt Silver Layer (schema: silver)"]
+        STG["Cleaned & Deduped Tables<br/>(stg_customers, stg_orders, stg_items...)"]
+        BRZ -->|"dbt run --select staging"| STG
     end
 
-    subgraph S5["5. Business Intelligence & Analytics"]
+    subgraph S5["5. dbt Gold Layer (schema: gold)"]
+        GOLD["Unified Star Schema Marts<br/>5 Dims (SCD2) + 2 Facts"]
+        TST["Audit Failure Schema<br/>(schema: test_failures)"]
+        STG -->|"dbt run --select marts"| GOLD
+        STG -.->|"dbt test"| TST
+        GOLD -.->|"dbt test"| TST
+    end
+
+    subgraph S6["6. Business Intelligence & Analytics"]
         BI["Dashboards & Self-Service BI<br/>PowerBI / Metabase / Tableau"]
-        MRT --> BI
+        GOLD --> BI
     end
 ```
 
@@ -159,37 +163,43 @@ flowchart TD
 
 ## 7. Data Processing Workflow
 
-The entire lifecycle executes end-to-end via `main.py` through 8 robust, decoupled steps:
+The entire lifecycle executes through a clean, decoupled 11-step workflow:
 
 ```
 [Start]
    │
    ▼
-1. Connection Verification  ──► Verify credentials for SQL Server (ODBC 18) and PostgreSQL.
+1. Connection Verification   ──► Verify credentials for SQL Server (ODBC 18) and PostgreSQL.
    │
    ▼
-2. Checkpoint Discovery    ──► Read latest watermark timestamps from `_etl_watermarks`.
+2. Checkpoint Discovery     ──► Read latest watermark timestamps from `_etl_watermarks`.
    │
    ▼
-3. Blue-Green Staging Prep ──► Recreate `raw_staging_tmp`, copy watermark states & base incremental tables.
+3. Blue-Green Staging Prep  ──► Recreate `bronze_staging_tmp`, copy watermark states & base incremental tables.
    │
    ▼
-4. Source Baseline Probe   ──► Measure exact row counts from SQL Server under `READ COMMITTED`.
+4. Source Baseline Probe    ──► Measure exact row counts from SQL Server under `READ COMMITTED`.
    │
    ▼
-5. Stream Extract & Clean  ──► Stream chunks (25k rows), filter NULL PKs, deduplicate on RAM.
+5. Stream Extract & Load    ──► Stream chunks (25k rows), attach `_batch_id` & `_extracted_at`, COPY directly to temp schema.
    │
    ▼
-6. Idempotent UPSERT       ──► Load into temp table, `DELETE ... USING` + `INSERT`, commit checkpoint.
+6. Integrity Check          ──► Ensure 100% of required tables loaded completely without drops.
    │
    ▼
-7. 2-Tier Baseline Audit   ──► Verify `stg_rows >= expected` and `loaded_rows == stg_rows`.
+7. 2-Tier Baseline Audit    ──► Verify `stg_rows >= expected` and `loaded_rows == stg_rows` (zero data loss).
    │
    ▼
-8. Atomic Schema Swap      ──► Swap `raw_staging_tmp` into `raw` in 0.05s via catalog rename.
+8. Atomic Schema Swap       ──► Swap `bronze_staging_tmp` into `bronze` in 0.05s via catalog rename.
    │
    ▼
-[dbt run & dbt test]        ──► Build `stg` views, materialize `marts` tables, enforce 100+ tests.
+9. dbt Silver Execution     ──► Build `silver.stg_*` models: filter NULL PKs, dedup via `ROW_NUMBER()`.
+   │
+   ▼
+10. dbt Gold Execution      ──► Build `gold.dim_*` (including SCD2) and `gold.fact_*` Unified Star Schema.
+   │
+   ▼
+11. Automated Data Testing  ──► Execute 100+ tests; isolate any violations into `test_failures`.
 ```
 
 ---
@@ -269,8 +279,8 @@ erDiagram
         uuid product_key PK
         string product_id
         string product_category_name
-        int product_photos_quantity
-        numeric product_weight_g
+        numeric weight_kg
+        numeric volume_m3
     }
 
     dim_seller {
@@ -328,14 +338,16 @@ The pipeline deploys a multi-barrier defense mechanism covering all stages:
 
 ```text
 etl_ecommerce_data/
-├── .env                              # Environment connection credentials
+├── .env                              # Environment connection credentials (TGT_DB_SCHEMA=bronze)
 ├── .env.example                      # Documented template for environment setup
 ├── .gitattributes                    # Enforces LF line endings for shell scripts
 ├── .gitignore                        # Git exclusions (caches, logs, credentials)
 ├── requirements.txt                  # Python dependencies
 ├── run.sh                            # Unified CLI execution script
-├── main.py                           # Clean 8-step pipeline orchestrator
-├── tong_hop_van_de_du_an.txt         # Comprehensive project issue & resolution ledger
+├── main.py                           # Clean pipeline orchestrator (Bronze -> optional dbt)
+│
+├── logs/
+│   └── pipeline.log                  # Single consolidated log file (EL + dbt with 10MB rotation)
 │
 ├── Docker/
 │   ├── Dockerfile                    # Debian 12 + Python 3.11 + Microsoft ODBC Driver 18
@@ -350,47 +362,45 @@ etl_ecommerce_data/
 │   │   ├── create_table.sql          # Source schema DDL with constraints
 │   │   ├── insert_data.sql           # Seed data insertion script
 │   │   └── validate_source.sql       # SQL Server pre-flight validation queries
-│   └── raw/                          # PostgreSQL Staging DDL
-│       ├── raw_table.sql             # Staging DDL with Primary Keys & Indexes
-│       └── validate_staging.sql      # PostgreSQL staging validation queries
+│   └── raw/                          # PostgreSQL Bronze DDL
+│       ├── raw_table.sql             # Bronze DDL with metadata columns & watermark indexes
+│       └── validate_staging.sql      # Bronze audit queries
 │
-├── src/                              # Modular Python Ingestion Engine
+├── src/                              # Modular Python Ingestion Engine (Bronze Layer)
 │   ├── config/
 │   │   ├── config.py                 # Settings, DB engines, and connection strings
 │   │   └── extract_rules.yaml        # Table-level extraction rules & strategies
-│   ├── cleaner/
-│   │   ├── __init__.py
-│   │   └── data_cleaner.py           # In-memory RAM cleaning & duplicate filtering
 │   ├── schema/
 │   │   ├── __init__.py               # Unified schema management entrypoint
 │   │   ├── contract.py               # Pre-extract schema contract verification
-│   │   ├── evolution.py              # Dynamic target schema evolution & PK indexing
-│   │   └── swap.py                   # Blue-Green temporary schema & atomic swap
-│   ├── validate/                     # 3-File Validation Module (No __init__.py)
+│   │   ├── evolution.py              # Dynamic target schema evolution
+│   │   └── swap.py                   # Blue-Green temporary schema & atomic swap (0.05s)
+│   ├── validate/
 │   │   ├── validate_source.py        # Connection checks & source baseline measurement
 │   │   ├── validate_target.py        # 2-Tier row count audit against baseline
 │   │   └── validate_pipeline.py      # Table load completeness enforcement
 │   ├── checkpoint.py                 # Watermark checkpoint persistence (_etl_watermarks)
 │   ├── database.py                   # Engine initialization & connection healthcheck
 │   ├── extract.py                    # Generator-based chunk streaming from SQL Server
-│   ├── load.py                       # High-speed COPY stream & idempotent UPSERT
-│   └── logger.py                     # Structured colored console and file logging
+│   ├── load.py                       # High-speed COPY stream directly into Bronze
+│   ├── logger.py                     # RotatingFileHandler logging to logs/pipeline.log
+│   └── dbt_runner.py                 # Real-time dbt log interceptor and runner
 │
-└── dbt_transform/                    # dbt Dimensional Modeling Project
-    ├── dbt_project.yml               # dbt configuration with failure capture
+└── dbt_transform/                    # dbt Dimensional Modeling Project (Silver & Gold)
+    ├── dbt_project.yml               # Configures +schema: silver and +schema: gold
     ├── profiles.yml                  # PostgreSQL target profiles
     ├── macros/
-    │   ├── generate_schema_name.sql  # Override default schema prefixing (clean stg/marts)
+    │   ├── generate_schema_name.sql  # Custom macro ensuring clean schema naming (silver, gold)
     │   └── unique_combination.sql    # Generic test for composite primary keys
     ├── models/
-    │   ├── staging/                  # Normalized staging views
-    │   │   ├── sources.yml           # Declarations of raw staging tables
-    │   │   ├── schema.yml            # Data tests & column documentation
-    │   │   └── stg_*.sql             # 7 clean staging model views
-    │   └── marts/                    # Star Schema Dimensional Data Marts
-    │       ├── schema.yml            # Indexes, tests, and documentation
-    │       ├── dim_*.sql             # Dimension models (customer SCD2, date, product...)
-    │       └── fact_*.sql            # Fact tables (fact_orders, fact_sales)
+    │   ├── staging/                  # ── [SILVER LAYER: CLEANED & DEDUPED] ──────────
+    │   │   ├── sources.yml           # Declarations of bronze raw source tables
+    │   │   ├── schema.yml            # Data tests & column documentation for Silver
+    │   │   └── stg_*.sql             # 7 deduplicated & cleaned staging models
+    │   └── marts/                    # ── [GOLD LAYER: UNIFIED STAR SCHEMA] ──────────
+    │       ├── schema.yml            # Indexes, tests, and documentation for Gold
+    │       ├── dim_*.sql             # 5 Dimensions (dim_customer SCD2, dim_product...)
+    │       └── fact_*.sql            # 2 Fact tables (fact_orders, fact_sales)
     └── tests/                        # Custom singular business logic assertions
         ├── assert_delivered_orders_have_delivery_date.sql
         ├── assert_fact_orders_match_sales_amount.sql
@@ -471,8 +481,8 @@ TGT_DB_NAME=
 TGT_DB_USER=
 # e.g., postgres
 TGT_DB_PASSWORD=
-# e.g., raw
-TGT_DB_SCHEMA=
+# e.g., bronze
+TGT_DB_SCHEMA=bronze
 ```
 
 ---
@@ -482,30 +492,31 @@ TGT_DB_SCHEMA=
 ### Option 1: Native Execution on Windows (PowerShell)
 
 ```powershell
-# 1. Run Extract & Load (Python Ingestion to Staging)
+# 1. Run Bronze ingestion only:
 .\.venv\Scripts\python.exe main.py
 
-# 2. Run dbt Transformations (Build Star Schema Marts)
-.\.venv\Scripts\dbt.exe run --project-dir dbt_transform
+# 2. Run entire Medallion pipeline end-to-end with unified logging:
+.\.venv\Scripts\python.exe main.py --all
 
-# 3. Run dbt Quality Tests (Audit assertions & store failures)
-.\.venv\Scripts\dbt.exe test --project-dir dbt_transform
-
-# Or execute end-to-end in a single chain:
-.\.venv\Scripts\python.exe main.py; .\.venv\Scripts\dbt.exe run --project-dir dbt_transform; .\.venv\Scripts\dbt.exe test --project-dir dbt_transform
+# Or run individual dbt transformation stages with unified logging:
+.\.venv\Scripts\python.exe -m src.dbt_runner silver
+.\.venv\Scripts\python.exe -m src.dbt_runner gold
+.\.venv\Scripts\python.exe -m src.dbt_runner test
 ```
 
 ### Option 2: Unified CLI via `run.sh` (Git Bash / Linux / macOS)
 
 ```bash
-# Execute entire pipeline (Extract-Load -> dbt run -> dbt test):
+# Execute entire pipeline end-to-end (Bronze -> Silver -> Gold -> Tests):
 ./run.sh pipeline
 
 # Or run individual stages:
-./run.sh extract-load   # Ingest from SQL Server into raw staging
-./run.sh transform      # Materialize data marts with dbt
-./run.sh test           # Run 100+ automated data quality tests
-./run.sh clean          # Clean dbt compilation artifacts
+./run.sh extract-load        # Ingest from SQL Server into PostgreSQL Bronze
+./run.sh transform           # Run dbt Silver, Gold, and automated tests
+./run.sh transform-silver    # Build only Silver staging models
+./run.sh transform-gold      # Build only Gold Star Schema models
+./run.sh test                # Run 100+ automated data quality tests
+./run.sh clean               # Clean dbt compilation artifacts
 ```
 
 ### Option 3: Full Multi-Container Stack with Docker Compose
@@ -523,7 +534,7 @@ docker compose --env-file .env -f Docker/docker-compose.yml up --build
 
 ## 13. Results and Sample Queries
 
-Once the pipeline completes, analytical consumers can immediately query high-value metrics from the `marts` schema.
+Once the pipeline completes, analytical consumers can immediately query high-value metrics from the `gold` schema.
 
 ### Query 1: Monthly Gross Merchandise Value (GMV) & Growth Rate
 ```sql
@@ -534,8 +545,8 @@ select
     count(distinct fo.order_key) as total_orders,
     sum(fo.total_order_amount) as gross_revenue,
     round(avg(fo.review_score), 2) as avg_satisfaction_score
-from marts.fact_orders fo
-inner join marts.dim_date d on fo.purchase_date_key = d.date_key
+from gold.fact_orders fo
+inner join gold.dim_date d on fo.purchase_date_key = d.date_key
 where fo.order_status = 'delivered'
 group by d.year, d.month, d.month_name
 order by d.year, d.month;
@@ -550,8 +561,8 @@ select
     count(case when fo.delivery_status = 'Late' then 1 end) as late_shipments,
     round(100.0 * count(case when fo.delivery_status = 'On Time' then 1 end) / count(*), 2) as on_time_rate_pct,
     round(avg(fo.total_freight_amount), 2) as avg_freight_cost
-from marts.fact_orders fo
-inner join marts.dim_location dl on fo.shipping_location_key = dl.location_key
+from gold.fact_orders fo
+inner join gold.dim_location dl on fo.shipping_location_key = dl.location_key
 where fo.order_status = 'delivered'
 group by dl.state_code
 order by total_shipments desc;
@@ -564,8 +575,8 @@ select
     count(fs.sales_key) as items_sold,
     sum(fs.item_price) as category_revenue,
     round(avg(fs.item_price), 2) as avg_item_price
-from marts.fact_sales fs
-inner join marts.dim_product dp on fs.product_key = dp.product_key
+from gold.fact_sales fs
+inner join gold.dim_product dp on fs.product_key = dp.product_key
 group by dp.product_category_name
 order by category_revenue desc
 limit 10;
@@ -579,7 +590,7 @@ with customer_versions as (
         customer_unique_id,
         count(distinct location_key) as distinct_locations,
         count(*) as total_versions
-    from marts.dim_customer
+    from gold.dim_customer
     group by customer_unique_id
     having count(distinct location_key) > 1
 )
@@ -590,9 +601,9 @@ select
     dc.valid_from,
     dc.valid_to,
     dc.is_current
-from marts.dim_customer dc
+from gold.dim_customer dc
 inner join customer_versions cv on dc.customer_unique_id = cv.customer_unique_id
-inner join marts.dim_location dl on dc.location_key = dl.location_key
+inner join gold.dim_location dl on dc.location_key = dl.location_key
 order by dc.customer_unique_id, dc.valid_from;
 ```
 
@@ -610,14 +621,14 @@ limit 50;
 
 | Challenge / Scenario | Chosen Design Pattern | Trade-Off & Technical Rationale |
 |---|---|---|
-| **Pipeline Architecture** | **ELT** (Extract-Load-Transform) rather than traditional ETL | Leveraged PostgreSQL compute for SQL transformations rather than heavy Python RAM processing; preserved raw auditing fidelity in the staging layer. |
+| **Pipeline Architecture** | **Medallion Architecture** (Bronze -> Silver -> Gold) | Separation of concerns: Bronze stores 100% faithful raw data with audit metadata, Silver handles SQL cleaning and deduplication, Gold serves analytics. |
 | **Data Ingestion** | **Chunked Generator Streaming** (25,000 rows/batch) | Memory footprint never exceeds ~250MB even when processing millions of rows, enabling smooth execution on resource-constrained 4GB machines. |
-| **Fault Tolerance** | **Idempotent UPSERT with Checkpointing** (`_etl_watermarks`) | Traditional TRUNCATE/Full Load loses progress on network drop. UPSERT (`DELETE ... USING` + `INSERT`) allows continuous recovery from exact point of failure with zero duplicates. |
-| **Staging Downtime** | **Blue-Green Schema Swapping** (`raw_staging_tmp` -> `raw`) | Truncating staging tables leaves tables empty for 30-60 seconds during ingestion. Atomic catalog renaming (`ALTER SCHEMA`) reduces downtime to just 0.05 seconds. |
-| **Data Drift & Consistency** | **Upper-bound Cutoff Timestamp** | Prevents false-positive row count mismatch audits caused by records inserted into the source between baseline measurement and extraction completion. |
+| **Bronze Raw Fidelity** | **Zero-Drop Raw Landing** | No dropping rows or deduplicating on RAM in Python. Guarantees 100% auditability and enables complete pipeline replays from Bronze without querying production OLTP. |
+| **Staging Downtime** | **Blue-Green Schema Swapping** (`bronze_staging_tmp` -> `bronze`) | Truncating staging tables leaves tables empty during ingestion. Atomic catalog renaming (`ALTER SCHEMA`) reduces downtime to just 0.05 seconds. |
+| **Deduplication Strategy** | **SQL Window Function in Silver** | Uses `ROW_NUMBER() OVER (PARTITION BY pk ORDER BY _extracted_at DESC, _batch_id DESC) = 1` inside dbt to guarantee 100% idempotent deduplication. |
 | **Customer Dimension** | **SCD Type 2 Modeling** | Avoids overwriting historical customer addresses, ensuring past geographic revenue distributions remain historically accurate. |
-| **Schema Management** | **Custom Macro `generate_schema_name`** | Overrides dbt's default behavior of prefixing target schema (`analytics_stg`), producing clean, isolated schemas (`stg`, `marts`, `test_failures`). |
-| **Separation of Concerns** | **Decoupled Architecture** (`cleaner`, `schema`, `checkpoint`, `load`) | Adheres strictly to the Single Responsibility Principle (SRP), making components independently testable, maintainable, and readable. |
+| **Schema Management** | **Custom Macro `generate_schema_name`** | Overrides dbt's default behavior of prefixing target schema, producing clean, isolated schemas (`silver`, `gold`, `test_failures`). |
+| **Unified Logging** | **Single `pipeline.log` + Interceptor** | Intercepts dbt real-time stream into Python's structured logger, outputting everything into a single 10MB rotating file (`logs/pipeline.log`). |
 
 ---
 
