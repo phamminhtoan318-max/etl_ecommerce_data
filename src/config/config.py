@@ -59,7 +59,7 @@ TGT_DB_PORT = os.getenv("TGT_DB_PORT")
 TGT_DB_NAME = os.getenv("TGT_DB_NAME")
 TGT_DB_USER = os.getenv("TGT_DB_USER")
 TGT_DB_PASSWORD = os.getenv("TGT_DB_PASSWORD")
-TGT_DB_SCHEMA = os.getenv("TGT_DB_SCHEMA", "raw")
+TGT_DB_SCHEMA = os.getenv("TGT_DB_SCHEMA", "bronze")
 
 TGT_SQLALCHEMY_URI = (
     f"postgresql+psycopg2://{TGT_DB_USER}:{quote_plus(TGT_DB_PASSWORD or '')}@{TGT_DB_HOST}:{TGT_DB_PORT}/{TGT_DB_NAME}"

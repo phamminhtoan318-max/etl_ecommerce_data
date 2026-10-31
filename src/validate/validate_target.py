@@ -20,7 +20,7 @@ def validate_staging_against_baseline(
     tgt_schema=TGT_DB_SCHEMA,
     tgt_engine=None,
 ):
-    logger.info("=== [CƠ CHẾ 2 - POST-LOAD] BẮT ĐẦU ĐỐI CHIẾU TOÀN DIỆN TẦNG STAGING VỚI BASELINE ===")
+    logger.info("=== [CƠ CHẾ 2 - POST-LOAD] BẮT ĐẦU ĐỐI CHIẾU TOÀN DIỆN TẦNG BRONZE VỚI BASELINE ===")
     tgt_engine = tgt_engine or get_target_engine()
     pipeline_stats = pipeline_stats or {}
     errors = []
@@ -53,11 +53,12 @@ def validate_staging_against_baseline(
 
         if stg_pk_issues:
             for issue in stg_pk_issues:
-                err = f"[LỖI PK STAGING] {issue['check_type']}: Phát hiện {issue['issue_count']:,} dòng vi phạm!"
-                errors.append(err)
-                logger.error(err)
+                logger.warning(
+                    f"[BRONZE AUDIT] {issue['check_type']}: Phát hiện {issue['issue_count']:,} dòng trong tầng Bronze "
+                    f"-> Dữ liệu được bảo toàn nguyên bản; dbt Silver sẽ tự động làm sạch & dedup."
+                )
         else:
-            logger.info("[VALIDATE STAGING] Khóa chính tầng Staging: 0 NULL & 0 Trùng lặp trên toàn bộ 7 bảng.")
+            logger.info("[VALIDATE BRONZE] Khóa chính tầng Bronze: 0 NULL & 0 Trùng lặp trên toàn bộ 7 bảng.")
 
         if len(statements) >= 3:
             res_dates = conn.execute(text(statements[2])).fetchall()
@@ -91,8 +92,8 @@ def validate_staging_against_baseline(
                 if strategy == "full" and loaded_rows != stg_rows:
                     diff = abs(loaded_rows - stg_rows)
                     err = (
-                        f"[THẤT THOÁT DỮ LIỆU STAGING] Bảng '{logical_name}': Đã nạp {loaded_rows:,} dòng "
-                        f"nhưng Staging chỉ lưu {stg_rows:,} dòng (lệch {diff:,} dòng)!"
+                        f"[THẤT THOÁT DỮ LIỆU BRONZE] Bảng '{logical_name}': Đã nạp {loaded_rows:,} dòng "
+                        f"nhưng Bronze chỉ lưu {stg_rows:,} dòng (lệch {diff:,} dòng)!"
                     )
                     errors.append(err)
                     logger.error(err)
@@ -102,7 +103,7 @@ def validate_staging_against_baseline(
                     diff = expected_source_rows - stg_rows
                     err = (
                         f"[THIẾU DÒNG NGUỒN] Bảng '{logical_name}': Nguồn ban đầu có {expected_source_rows:,} dòng "
-                        f"nhưng Staging chỉ nạp {stg_rows:,} dòng (hụt {diff:,} dòng)!"
+                        f"nhưng Bronze chỉ nạp {stg_rows:,} dòng (hụt {diff:,} dòng)!"
                     )
                     errors.append(err)
                     logger.error(err)
@@ -137,7 +138,7 @@ def validate_staging_against_baseline(
             expected_cols = set(base_info.get("expected_columns", [])) | {"_extracted_at", "_batch_id"}
             missing_cols = sorted(expected_cols - stg_cols)
             if missing_cols:
-                err = f"[THIẾU CỘT STAGING] Bảng '{tgt_schema}.{tbl_name}' thiếu các cột: {missing_cols}"
+                err = f"[THIẾU CỘT BRONZE] Bảng '{tgt_schema}.{tbl_name}' thiếu các cột: {missing_cols}"
                 errors.append(err)
                 logger.error(err)
 
@@ -147,13 +148,13 @@ def validate_staging_against_baseline(
                 if src_date["min"] != stg_date["min"] or src_date["max"] != stg_date["max"]:
                     err = (
                         f"[LỆCH MỐC THỜI GIAN] Bảng '{logical_name}' ({src_date['column']}): "
-                        f"Staging [{stg_date['min']} -> {stg_date['max']}] khác Source [{src_date['min']} -> {src_date['max']}]!"
+                        f"Bronze [{stg_date['min']} -> {stg_date['max']}] khác Source [{src_date['min']} -> {src_date['max']}]!"
                     )
                     errors.append(err)
                     logger.error(err)
                 else:
                     logger.info(
-                        f"[VALIDATE STAGING] Bảng '{logical_name:<14}': Khớp 100% mốc thời gian "
+                        f"[VALIDATE BRONZE] Bảng '{logical_name:<14}': Khớp 100% mốc thời gian "
                         f"[{stg_date['min']} -> {stg_date['max']}]"
                     )
 
@@ -164,11 +165,11 @@ def validate_staging_against_baseline(
 
     if errors:
         summary_err = (
-            f"\n❌ [DỪNG PIPELINE] Phát hiện {len(errors)} sai lệch giữa Source và Staging:\n"
+            f"\n❌ [DỪNG PIPELINE] Phát hiện {len(errors)} sai lệch giữa Source và Bronze:\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
         logger.error(summary_err)
         raise ValueError(summary_err)
 
-    logger.info("=== ✅ [ĐỐI CHIẾU THÀNH CÔNG] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀ KHỚP 100% VỚI BASELINE! ===")
+    logger.info("=== ✅ [ĐỐI CHIẾU THÀNH CÔNG] DỮ LIỆU ĐÃ NẠP AN TOÀN VÀO BRONZE VÀ KHỚP 100% VỚI BASELINE! ===")
     return True

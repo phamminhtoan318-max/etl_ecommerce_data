@@ -4,7 +4,6 @@ import time
 import pandas as pd
 from sqlalchemy import text
 from src.checkpoint import get_watermark_states, upsert_watermark_state
-from src.cleaner.data_cleaner import clean_and_dedup_chunk
 from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
 from src.logger import get_logger
 from src.schema import (
@@ -15,7 +14,6 @@ from src.schema import (
 
 logger = get_logger(__name__)
 
-_clean_and_dedup_chunk = clean_and_dedup_chunk
 _upsert_watermark_state = upsert_watermark_state
 
 
@@ -57,8 +55,6 @@ def stream_load_table_to_postgres(
     rule = rule or {}
     primary_keys = rule.get("primary_keys") or []
     watermark_column = rule.get("watermark_column")
-    use_temp_upsert = norm_strategy != "full" and len(primary_keys) > 0
-    temp_table_name = f"_tmp_{table_name}"
 
     with tgt_engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{tgt_schema}";'))
@@ -70,7 +66,6 @@ def stream_load_table_to_postgres(
             logger.info(f'[TRUNCATE] Đã làm sạch bảng "{tgt_schema}"."{table_name}" (giữ nguyên cấu trúc DDL).')
 
             for chunk in chunk_stream:
-                chunk = clean_and_dedup_chunk(chunk, primary_keys, table_name)
                 if chunk.empty:
                     continue
                 if "_batch_id" in chunk.columns and len(chunk) > 0:
@@ -110,7 +105,6 @@ def stream_load_table_to_postgres(
         try:
             for chunk in chunk_stream:
                 batch_idx += 1
-                chunk = clean_and_dedup_chunk(chunk, primary_keys, table_name, f"chunk #{batch_idx}")
                 chunk_rows = len(chunk)
                 if chunk_rows == 0:
                     continue
@@ -128,44 +122,14 @@ def stream_load_table_to_postgres(
                 )
 
                 with tgt_engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            f'CREATE TEMP TABLE "{temp_table_name}" '
-                            f'(LIKE "{tgt_schema}"."{table_name}" INCLUDING DEFAULTS) ON COMMIT DROP;'
-                        )
-                    )
-
                     chunk.to_sql(
-                        name=temp_table_name,
+                        name=table_name,
                         con=conn,
-                        schema=None,
+                        schema=tgt_schema,
                         if_exists="append",
                         index=False,
                         method=_psql_copy_method,
                     )
-
-                    if use_temp_upsert:
-                        pk_join_cond = " AND ".join(f't."{pk}" = s."{pk}"' for pk in primary_keys)
-                        conn.execute(
-                            text(
-                                f'DELETE FROM "{tgt_schema}"."{table_name}" AS t '
-                                f'USING "{temp_table_name}" AS s '
-                                f"WHERE {pk_join_cond};"
-                            )
-                        )
-                        conn.execute(
-                            text(
-                                f'INSERT INTO "{tgt_schema}"."{table_name}" '
-                                f'SELECT * FROM "{temp_table_name}";'
-                            )
-                        )
-                    else:
-                        conn.execute(
-                            text(
-                                f'INSERT INTO "{tgt_schema}"."{table_name}" '
-                                f'SELECT * FROM "{temp_table_name}";'
-                            )
-                        )
 
                     if logical_name and watermark_column and chunk_max_wm is not None:
                         upsert_watermark_state(
@@ -193,6 +157,10 @@ def stream_load_table_to_postgres(
             )
             raise ChunkLoadError(
                 original_error=e,
+                batch_idx=batch_idx,
+                committed_rows=total_rows,
+                last_checkpoint_wm=last_checkpoint_wm,
+            ) from e
                 batch_idx=batch_idx,
                 committed_rows=total_rows,
                 last_checkpoint_wm=last_checkpoint_wm,

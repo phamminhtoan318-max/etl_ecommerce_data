@@ -7,24 +7,21 @@ logger = get_logger(__name__)
 
 
 def init_staging_tables(tgt_engine, ddl_path=STAGING_DDL_SQL_PATH, tgt_schema: str = TGT_DB_SCHEMA):
-    """Khởi tạo cấu trúc bảng Staging từ file DDL và gắn khóa chính kèm Index."""
     if not ddl_path.exists():
-        raise FileNotFoundError(f"Không tìm thấy file DDL khởi tạo Staging: {ddl_path}")
+        raise FileNotFoundError(f"Không tìm thấy file DDL khởi tạo Bronze: {ddl_path}")
 
     ddl_sql = ddl_path.read_text(encoding="utf-8").replace("{schema}", tgt_schema)
     with tgt_engine.begin() as conn:
         conn.execute(text(ddl_sql))
-    logger.info(f"[INIT STAGING] Đã kiểm tra và khởi tạo cấu trúc bảng Staging '{tgt_schema}' từ '{ddl_path.name}'.")
-    ensure_staging_primary_keys(tgt_engine, tgt_schema=tgt_schema)
+    logger.info(f"[INIT BRONZE] Đã khởi tạo cấu trúc 7 bảng raw Bronze '{tgt_schema}' từ '{ddl_path.name}'.")
 
 
 def prepare_staging_schema(
     tgt_engine,
-    tmp_schema: str = "raw_staging_tmp",
+    tmp_schema: str = "bronze_staging_tmp",
     target_schema: str = TGT_DB_SCHEMA,
     ddl_path=STAGING_DDL_SQL_PATH,
 ):
-    """Chuẩn bị schema nháp Blue-Green Staging: DDL bảng, sao chép watermark và bảng incremental cơ sở."""
     with tgt_engine.begin() as conn:
         conn.execute(text(f'DROP SCHEMA IF EXISTS "{tmp_schema}" CASCADE;'))
         conn.execute(text(f'CREATE SCHEMA "{tmp_schema}";'))
@@ -69,11 +66,10 @@ def prepare_staging_schema(
 
 def execute_atomic_swap(
     tgt_engine,
-    tmp_schema: str = "raw_staging_tmp",
+    tmp_schema: str = "bronze_staging_tmp",
     target_schema: str = TGT_DB_SCHEMA,
-    backup_schema: str = "raw_old_backup",
+    backup_schema: str = "bronze_old_backup",
 ):
-    """Thực thi hoán đổi tên schema nguyên tử (Atomic Schema Swap) trong 0.05s."""
     logger.info(f"🔄 Đang thực hiện Atomic Schema Swap: '{tmp_schema}' -> '{target_schema}'...")
     with tgt_engine.begin() as conn:
         has_old = conn.execute(
@@ -93,10 +89,9 @@ def execute_atomic_swap(
 
 def cleanup_temp_schemas(
     tgt_engine,
-    tmp_schema: str = "raw_staging_tmp",
-    backup_schema: str = "raw_old_backup",
+    tmp_schema: str = "bronze_staging_tmp",
+    backup_schema: str = "bronze_old_backup",
 ):
-    """Dọn dẹp schema tạm và schema backup khi pipeline hoàn tất hoặc gặp sự cố."""
     if tgt_engine is not None:
         try:
             with tgt_engine.begin() as conn:
@@ -104,4 +99,3 @@ def cleanup_temp_schemas(
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{backup_schema}" CASCADE;'))
         except Exception:
             pass
-
