@@ -18,11 +18,11 @@ clean-targets:
 models:
   dbt_transform:
     staging:
-      +materialized: view
-      +schema: stg
+      +materialized: table
+      +schema: silver
     marts:
       +materialized: table
-      +schema: marts
+      +schema: gold
 
 tests:
   dbt_transform:
