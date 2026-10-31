@@ -35,17 +35,24 @@ extract_load() {
 }
 
 transform() {
-    (cd dbt_transform && "$DBT" run)
+    "$PYTHON" -m src.dbt_runner all
+}
+
+transform_silver() {
+    "$PYTHON" -m src.dbt_runner silver
+}
+
+transform_gold() {
+    "$PYTHON" -m src.dbt_runner gold
 }
 
 test_models() {
-    (cd dbt_transform && "$DBT" test)
+    "$PYTHON" -m src.dbt_runner test
 }
 
 pipeline() {
     extract_load
-    transform
-    test_models
+    "$PYTHON" -m src.dbt_runner all
     echo "Toan bo Pipeline da thuc thi hoan tat!"
 }
 
@@ -59,8 +66,8 @@ docker_up() {
 
 show_help() {
     echo "Cac lenh kha dung:"
-    echo "  ./run.sh extract-load - Trich xuat du lieu tu nguon va nap vao Staging"
-    echo "  ./run.sh transform    - Chay dbt run chuyen doi mo hinh Marts"
+    echo "  ./run.sh extract-load - Trich xuat du lieu tu nguon va nap vao Bronze"
+    echo "  ./run.sh transform    - Chay dbt Silver, Gold va Test voi log dong bo"
     echo "  ./run.sh test         - Chay dbt test kiem tra chat luong du lieu (luu loi vao DB)"
     echo "  ./run.sh pipeline     - Chay toan bo pipeline tu E&L den Transform & Test"
     echo "  ./run.sh clean        - Don dep thu muc build cua dbt"
@@ -73,6 +80,12 @@ case "$1" in
         ;;
     transform)
         transform
+        ;;
+    transform-silver)
+        transform_silver
+        ;;
+    transform-gold)
+        transform_gold
         ;;
     test)
         test_models

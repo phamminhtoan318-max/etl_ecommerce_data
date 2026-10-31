@@ -104,9 +104,13 @@ def main():
         total_rows = sum(s["loaded_rows"] for s in pipeline_stats.values())
         total_elapsed = time.time() - pipeline_start
         logger.info(
-            f"📊 TỔNG CỘNG: {len(pipeline_stats)} bảng | {total_rows:,} dòng | Tổng thời gian toàn pipeline: {total_elapsed:.2f}s"
+            f"📊 TỔNG CỘNG BRONZE: {len(pipeline_stats)} bảng | {total_rows:,} dòng | Thời gian nạp: {total_elapsed:.2f}s"
         )
-        logger.info("🎉 PIPELINE HOÀN TẤT")
+        logger.info("🎉 NẠP TẦNG BRONZE THÀNH CÔNG 100%!")
+
+        if "--transform" in sys.argv or "--all" in sys.argv:
+            from src.dbt_runner import run_dbt_all
+            run_dbt_all()
 
     except SchemaValidationError as sve:
         total_elapsed = time.time() - pipeline_start
