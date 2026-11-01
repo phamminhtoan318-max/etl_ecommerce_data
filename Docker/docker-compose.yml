@@ -1,7 +1,7 @@
 services:
   postgres_dwh:
     image: postgres:16
-    container_name: olist_postgres_dwh
+    container_name: olist_dwh
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${TGT_DB_NAME:-olist_dwh}
@@ -17,12 +17,13 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - etl_network
+      - elt_network
 
   etl_pipeline:
     build:
       context: ..
-      dockerfile: Docker/Dockerfile
+      dockerfile: Docker/Dockerfile 
+    image: olist_etl_app
     container_name: olist_etl_app
     depends_on:
       postgres_dwh:
@@ -39,11 +40,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - etl_network
+      - elt_network
 
 volumes:
   postgres_dwh_data:
 
 networks:
-  etl_network:
+  elt_network:
     driver: bridge

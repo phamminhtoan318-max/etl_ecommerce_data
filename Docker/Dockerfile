@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # 1. Cài đặt các thư viện hệ thống và Microsoft ODBC Driver 18 cho SQL Server trên Linux
 RUN apt-get update && apt-get install -y --no-install-recommends \
