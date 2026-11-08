@@ -17,7 +17,7 @@ select
     dc.customer_key,
     dp.product_key,
     ds.seller_key,
-    dl.location_key as shipping_location_key,
+    coalesce(dl.location_key, '00000000-0000-0000-0000-000000000000'::uuid) as shipping_location_key,
     to_char(o.purchased_at, 'YYYYMMDD')::integer as purchase_date_key,
     oi.item_price,
     oi.freight_value,

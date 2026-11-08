@@ -38,7 +38,7 @@ select
     md5(o.order_id)::uuid as order_key,
     o.order_id,
     dc.customer_key,
-    dl.location_key as shipping_location_key,
+    coalesce(dl.location_key, '00000000-0000-0000-0000-000000000000'::uuid) as shipping_location_key,
     to_char(o.purchased_at, 'YYYYMMDD')::integer as purchase_date_key,
     to_char(o.approved_at, 'YYYYMMDD')::integer as approved_date_key,
     to_char(o.delivered_to_customer_at, 'YYYYMMDD')::integer as delivered_date_key,

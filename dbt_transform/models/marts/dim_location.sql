@@ -18,4 +18,11 @@ select
     md5(concat(city_name, '-', state_code))::uuid as location_key,
     city_name,
     state_code
-from all_locations 
+from all_locations
+
+union all
+
+select
+    '00000000-0000-0000-0000-000000000000'::uuid as location_key,
+    'unknown' as city_name,
+    'XX' as state_code

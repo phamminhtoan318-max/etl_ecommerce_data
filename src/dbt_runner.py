@@ -20,14 +20,14 @@ def _format_and_log_dbt_line(line, stage_prefix):
     if any(k in cleaned for k in ["Running with dbt=", "Registered adapter:", "Performance info:", "dbt v2 is available", "New project -", "Existing v1"]):
         return
 
-    start_match = re.search(r"(\d+ of \d+)\s+START\s+(\w+)\s+(table|view|incremental)\s+model\s+([\w\.]+)", cleaned)
+    start_match = re.search(r"(\d+ of \d+)\s+START\s+(\w+)\s+(table|view|incremental|snapshot)\s+model\s+([\w\.]+)", cleaned)
     if start_match:
         progress = start_match.group(1)
         model_name = start_match.group(4)
         logger.info(f"[{stage_prefix}] ⏳ Đang xây dựng ({progress}): {model_name}...")
         return
 
-    ok_match = re.search(r"(\d+ of \d+)\s+OK created\s+(\w+)\s+(table|view|incremental)\s+model\s+([\w\.]+)\s+\.*?\s*\[(.*?)\]", cleaned)
+    ok_match = re.search(r"(\d+ of \d+)\s+OK created\s+(\w+)\s+(table|view|incremental|snapshot)\s+model\s+([\w\.]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if ok_match:
         progress = ok_match.group(1)
         model_name = ok_match.group(4)
@@ -38,7 +38,7 @@ def _format_and_log_dbt_line(line, stage_prefix):
     err_match = re.search(r"(\d+ of \d+)?\s*ERROR creating.*?model\s+([\w\.]+)\s+\.*?\s*\[(.*?)\]", cleaned)
     if err_match:
         model_name = err_match.group(2)
-        perf = err_match.group(3)
+        perf = err_match.group(3) if len(err_match.groups()) >= 3 else "ERROR"
         logger.error(f"[{stage_prefix}] ❌ THẤT BẠI: {model_name} [{perf}]")
         return
 
@@ -124,6 +124,14 @@ def run_dbt_command(command_args, stage_prefix, stage_label):
     return True
 
 
+def run_dbt_snapshot():
+    return run_dbt_command(
+        ["snapshot"],
+        stage_prefix="DBT SNAPSHOT",
+        stage_label="Theo dõi lịch sử thay đổi SCD Type 2",
+    )
+
+
 def run_dbt_silver():
     return run_dbt_command(
         ["run", "--select", "staging"],
@@ -152,6 +160,7 @@ def run_dbt_all():
     logger.info("================================================================================")
     logger.info("=== BẮT ĐẦU CHUỖI BIẾN ĐỔI DỮ LIỆU & KIỂM ĐỊNH CHẤT LƯỢNG (DBT TRANSFORMATION) ===")
     logger.info("================================================================================")
+    run_dbt_snapshot()
     run_dbt_silver()
     run_dbt_gold()
     run_dbt_test()
@@ -162,7 +171,9 @@ def run_dbt_all():
 
 if __name__ == "__main__":
     action = sys.argv[1].lower() if len(sys.argv) > 1 else "all"
-    if action == "silver":
+    if action == "snapshot":
+        run_dbt_snapshot()
+    elif action == "silver":
         run_dbt_silver()
     elif action == "gold":
         run_dbt_gold()

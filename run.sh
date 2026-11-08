@@ -34,12 +34,16 @@ extract_load() {
     "$PYTHON" main.py
 }
 
-transform() {
-    "$PYTHON" -m src.dbt_runner all
+resume_load() {
+    "$PYTHON" main.py --resume
 }
 
 transform_silver() {
     "$PYTHON" -m src.dbt_runner silver
+}
+
+transform_snapshot() {
+    "$PYTHON" -m src.dbt_runner snapshot
 }
 
 transform_gold() {
@@ -50,9 +54,17 @@ test_models() {
     "$PYTHON" -m src.dbt_runner test
 }
 
+transform() {
+    "$PYTHON" -m src.dbt_runner all
+}
+
+unit_test() {
+    "$PYTHON" -m unittest discover -s tests -v
+}
+
 pipeline() {
     extract_load
-    "$PYTHON" -m src.dbt_runner all
+    transform
     echo "Toan bo Pipeline da thuc thi hoan tat!"
 }
 
@@ -67,8 +79,11 @@ docker_up() {
 show_help() {
     echo "Cac lenh kha dung:"
     echo "  ./run.sh extract-load - Trich xuat du lieu tu nguon va nap vao Bronze"
-    echo "  ./run.sh transform    - Chay dbt Silver, Gold va Test voi log dong bo"
+    echo "  ./run.sh resume       - Tiep tuc nap Bronze tu moc Checkpoint neu bi gian doan"
+    echo "  ./run.sh transform    - Chay dbt Silver, Snapshot, Gold va Test voi log dong bo"
+    echo "  ./run.sh snapshot     - Chay dbt snapshot theo doi lich su SCD Type 2"
     echo "  ./run.sh test         - Chay dbt test kiem tra chat luong du lieu (luu loi vao DB)"
+    echo "  ./run.sh unit-test    - Chay Unit Tests kiem thu logic Python"
     echo "  ./run.sh pipeline     - Chay toan bo pipeline tu E&L den Transform & Test"
     echo "  ./run.sh clean        - Don dep thu muc build cua dbt"
     echo "  ./run.sh docker       - Build va chay Postgres + pipeline bang Docker Compose"
@@ -78,17 +93,26 @@ case "$1" in
     extract-load)
         extract_load
         ;;
+    resume)
+        resume_load
+        ;;
     transform)
         transform
         ;;
     transform-silver)
         transform_silver
         ;;
+    snapshot)
+        transform_snapshot
+        ;;
     transform-gold)
         transform_gold
         ;;
     test)
         test_models
+        ;;
+    unit-test)
+        unit_test
         ;;
     pipeline|pineline)
         pipeline

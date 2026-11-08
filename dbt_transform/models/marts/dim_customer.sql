@@ -63,7 +63,7 @@ scd_calculated as (
 select
     md5(concat(customer_unique_id, '-', valid_from::text))::uuid as customer_key,
     customer_unique_id,
-    location_key,
+    coalesce(location_key, '00000000-0000-0000-0000-000000000000'::uuid) as location_key,
     valid_from,
     coalesce(next_valid_from, '9999-12-31'::timestamp) as valid_to,
     case

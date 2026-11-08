@@ -9,7 +9,7 @@ locations as (
 select
     md5(s.seller_id)::uuid as seller_key,
     s.seller_id,
-    l.location_key
+    coalesce(l.location_key, '00000000-0000-0000-0000-000000000000'::uuid) as location_key
 from sellers s
 left join locations l
     on s.seller_city = l.city_name
