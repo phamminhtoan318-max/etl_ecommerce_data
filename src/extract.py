@@ -110,6 +110,7 @@ def build_dynamic_query(
         try:
             dt = datetime.fromisoformat(str(mark)[:19])
             adjusted_mark = (dt - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            rule["adjusted_mark"] = adjusted_mark
             where_filter = f"[{col}] > '{adjusted_mark}'{cutoff_filter}"
             logger.info(f"[{logical_name}] Chế độ trích xuất: LOOKBACK ({where_filter})")
         except Exception as e:
@@ -128,7 +129,7 @@ def build_dynamic_query(
                 f"-> HỦY (CANCEL) trích xuất bảng này."
             )
             return None
-        where_filter = f"{col} >= '{start_d}' AND {col} < '{end_d}'"
+        where_filter = f"[{col}] >= '{start_d}' AND [{col}] < '{end_d}'"
         logger.info(f"[{logical_name}] Chế độ trích xuất: DATE_RANGE ({start_d} -> {end_d})")
 
     else:
@@ -169,6 +170,10 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
 
     try:
         with engine.connect().execution_options(stream_results=True) as conn:
+            try:
+                conn.execute(text("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;"))
+            except Exception:
+                pass
             reader = pd.read_sql(query, conn, chunksize=chunksize, dtype_backend="numpy_nullable")
             t0 = time.time()
             for chunk in reader:
@@ -202,22 +207,30 @@ def extract_table(logical_name, sql_table_name, rule, engine, batch_time, batch_
     )
 
 
-def extract_from_sqlserver(schema="dbo", batch_time=None, watermark_states=None):
+def extract_from_sqlserver(schema="dbo", batch_time=None, watermark_states=None, source_baseline=None):
     total_start = time.time()
     if batch_time is None:
         batch_time = datetime.now(timezone.utc)
     batch_id = batch_time.strftime("%Y%m%d_%H%M%S")
     watermark_states = watermark_states or {}
+    source_baseline = source_baseline or {}
 
     logger.info(f"=== BẮT ĐẦU EXTRACT LINH HOẠT TỪ SOURCE - BATCH: {batch_id} ===")
 
     engine = get_source_engine()
+    inspector = None
+    existing_tables = None
 
-    try:
-        inspector = inspect(engine)
-        existing_tables = set(inspector.get_table_names(schema=schema))
-
-        for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
+    for logical_name, rule in EXTRACT_PIPELINE_RULES.items():
+        if logical_name in source_baseline:
+            base_info = source_baseline[logical_name]
+            actual_name = base_info["actual_table_name"]
+            resolved_columns = base_info["expected_columns"]
+            source_columns = base_info.get("source_columns_meta", [])
+        else:
+            if inspector is None:
+                inspector = inspect(engine)
+                existing_tables = set(inspector.get_table_names(schema=schema))
             actual_name = resolve_table_name(existing_tables, rule["candidates"])
             if not actual_name:
                 msg = (
@@ -234,40 +247,38 @@ def extract_from_sqlserver(schema="dbo", batch_time=None, watermark_states=None)
                 rule=rule,
                 source_columns=source_columns,
             )
-            rule["resolved_columns"] = resolved_columns
-            rule["source_columns"] = source_columns
 
-            last_wm = watermark_states.get(logical_name)
+        rule["resolved_columns"] = resolved_columns
+        rule["source_columns"] = source_columns
 
-            query_str = build_dynamic_query(
-                logical_name,
-                actual_name,
-                rule,
-                last_watermark=last_wm,
-                schema=schema,
-                resolved_columns=resolved_columns,
-                batch_time=batch_time,
-            )
-            if not query_str:
-                logger.warning(f"⏩ [BỎ QUA BẢNG] '{logical_name}' bị hủy do lỗi cơ chế/cancel. Tiếp tục các bảng khác...")
-                continue
+        last_wm = watermark_states.get(logical_name)
 
-            table_stream = extract_table(
-                logical_name=logical_name,
-                sql_table_name=actual_name,
-                rule=rule,
-                engine=engine,
-                batch_time=batch_time,
-                batch_id=batch_id,
-                last_watermark=last_wm,
-                query_str=query_str,
-                schema=schema,
-            )
+        query_str = build_dynamic_query(
+            logical_name,
+            actual_name,
+            rule,
+            last_watermark=last_wm,
+            schema=schema,
+            resolved_columns=resolved_columns,
+            batch_time=batch_time,
+        )
+        if not query_str:
+            logger.warning(f"⏩ [BỎ QUA BẢNG] '{logical_name}' bị hủy do lỗi cơ chế/cancel. Tiếp tục các bảng khác...")
+            continue
 
-            yield logical_name, actual_name, rule, table_stream
+        table_stream = extract_table(
+            logical_name=logical_name,
+            sql_table_name=actual_name,
+            rule=rule,
+            engine=engine,
+            batch_time=batch_time,
+            batch_id=batch_id,
+            last_watermark=last_wm,
+            query_str=query_str,
+            schema=schema,
+        )
 
-        total_elapsed = time.time() - total_start
-        logger.info(f"=== KẾT THÚC BƯỚC EXTRACT (TỔNG THỜI GIAN: {total_elapsed:.2f}s) ===")
+        yield logical_name, actual_name, rule, table_stream
 
-    finally:
-        engine.dispose()
+    total_elapsed = time.time() - total_start
+    logger.info(f"=== KẾT THÚC BƯỚC EXTRACT (TỔNG THỜI GIAN: {total_elapsed:.2f}s) ===")

@@ -28,6 +28,10 @@ def measure_source_baseline(schema="dbo", engine=None, watermark_states=None, ba
 
     source_baseline = {}
     with engine.connect() as conn:
+        try:
+            conn.execute(text("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;"))
+        except Exception:
+            pass
         row_counts = {}
         if len(statements) >= 1:
             res_rows = conn.execute(text(statements[0])).fetchall()
@@ -117,6 +121,7 @@ def measure_source_baseline(schema="dbo", engine=None, watermark_states=None, ba
                 "source_row_count": expected_row_count,
                 "expected_extract_rows": expected_extract_rows,
                 "source_columns": source_cols,
+                "source_columns_meta": source_columns_meta,
                 "expected_columns": expected_columns,
                 "source_col_count": len(source_cols),
                 "expected_col_count": expected_col_count,

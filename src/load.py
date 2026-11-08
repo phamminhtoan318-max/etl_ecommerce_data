@@ -4,6 +4,7 @@ import time
 import pandas as pd
 from sqlalchemy import text
 from src.checkpoint import get_watermark_states, upsert_watermark_state
+from src.checkpoint_manager import record_chunk_checkpoint_in_tx
 from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
 from src.logger import get_logger
 from src.schema import sync_target_schema_evolution
@@ -98,6 +99,18 @@ def stream_load_table_to_postgres(
     else:
         batch_idx = 0
         last_checkpoint_wm = None
+        adjusted_mark = rule.get("adjusted_mark")
+        if norm_strategy == "lookback_window" and watermark_column and adjusted_mark:
+            with tgt_engine.begin() as conn:
+                deleted_rows = conn.execute(
+                    text(f'DELETE FROM "{tgt_schema}"."{table_name}" WHERE "{watermark_column}" > :mark'),
+                    {"mark": adjusted_mark},
+                ).rowcount
+                if deleted_rows:
+                    logger.info(
+                        f"[LOOKBACK CLEANUP] Đã dọn dẹp {deleted_rows:,} dòng chồng lấn trong cửa sổ lookback "
+                        f"({watermark_column} > {adjusted_mark}) trên '{tgt_schema}.{table_name}'."
+                    )
         try:
             for chunk in chunk_stream:
                 batch_idx += 1
@@ -139,6 +152,18 @@ def stream_load_table_to_postgres(
                             overwrite=False,
                         )
                         last_checkpoint_wm = chunk_max_wm
+
+
+                    if logical_name:
+                        record_chunk_checkpoint_in_tx(
+                            conn=conn,
+                            logical_name=logical_name,
+                            target_table=table_name,
+                            watermark_column=watermark_column,
+                            chunk_max_wm=chunk_max_wm,
+                            batch_id=chunk_batch_id or "BATCH_UNKNOWN",
+                            chunk_rows=chunk_rows,
+                        )
 
                 total_rows += chunk_rows
                 logger.debug(
