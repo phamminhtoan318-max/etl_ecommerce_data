@@ -19,6 +19,8 @@ load_dotenv(BASE_DIR / ".env")
 
 LOG_LEVEL_CONSOLE = os.getenv("LOG_LEVEL_CONSOLE", "INFO").upper()
 LOG_LEVEL_FILE = os.getenv("LOG_LEVEL_FILE", "DEBUG").upper()
+ETL_MAX_WORKERS = max(1, int(os.getenv("ETL_MAX_WORKERS", "4") or "4"))
+ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "").strip()
 
 
 SRC_DB_DRIVER = os.getenv("SRC_DB_DRIVER")

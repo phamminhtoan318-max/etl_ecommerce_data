@@ -1,11 +1,13 @@
+import json
+import urllib.request
 from sqlalchemy import text
-from src.config.config import EXTRACT_PIPELINE_RULES, TGT_DB_SCHEMA
+from src.config.config import ALERT_WEBHOOK_URL, EXTRACT_PIPELINE_RULES, TGT_DB_SCHEMA
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def get_watermark_states(tgt_engine, tgt_schema: str = TGT_DB_SCHEMA) -> dict:
+def get_watermark_states(tgt_engine, tgt_schema=TGT_DB_SCHEMA):
     watermark_states = {}
     try:
         with tgt_engine.connect() as conn:
@@ -40,13 +42,13 @@ def get_watermark_states(tgt_engine, tgt_schema: str = TGT_DB_SCHEMA) -> dict:
 
 def upsert_watermark_state(
     conn,
-    tgt_schema: str,
-    logical_name: str,
-    target_table: str,
-    watermark_column: str,
+    tgt_schema,
+    logical_name,
+    target_table,
+    watermark_column,
     max_watermark,
-    batch_id: str = None,
-    overwrite: bool = False,
+    batch_id=None,
+    overwrite=False,
 ):
     if overwrite:
         watermark_update_clause = "last_watermark = EXCLUDED.last_watermark,"
@@ -80,3 +82,59 @@ def upsert_watermark_state(
         },
     )
 
+
+def save_pipeline_run_history(tgt_engine, tgt_schema, batch_id, pipeline_stats):
+    if not tgt_engine or not pipeline_stats:
+        return
+    try:
+        insert_sql = text(
+            f"""
+            INSERT INTO "{tgt_schema}"."_etl_run_history"
+                (batch_id, logical_name, source_table, target_table, strategy, loaded_rows, elapsed_sec, status, recorded_at)
+            VALUES
+                (:batch_id, :logical_name, :source_table, :target_table, :strategy, :loaded_rows, :elapsed_sec, :status, CURRENT_TIMESTAMP)
+            ON CONFLICT (batch_id, logical_name) DO UPDATE SET
+                source_table = EXCLUDED.source_table,
+                target_table = EXCLUDED.target_table,
+                strategy = EXCLUDED.strategy,
+                loaded_rows = EXCLUDED.loaded_rows,
+                elapsed_sec = EXCLUDED.elapsed_sec,
+                status = EXCLUDED.status,
+                recorded_at = CURRENT_TIMESTAMP;
+            """
+        )
+        with tgt_engine.begin() as conn:
+            for logical_name, stat in pipeline_stats.items():
+                conn.execute(
+                    insert_sql,
+                    {
+                        "batch_id": batch_id,
+                        "logical_name": logical_name,
+                        "source_table": stat.get("source_table"),
+                        "target_table": stat.get("target_table"),
+                        "strategy": str(stat.get("strategy", "")),
+                        "loaded_rows": int(stat.get("loaded_rows", 0)),
+                        "elapsed_sec": float(stat.get("elapsed_sec", 0.0)),
+                        "status": str(stat.get("status", "UNKNOWN")),
+                    },
+                )
+        logger.info(f"[RUN HISTORY] Đã lưu thống kê vận hành batch '{batch_id}' vào '{tgt_schema}._etl_run_history'.")
+    except Exception as e:
+        logger.debug(f"[RUN HISTORY] Chưa thể lưu lịch sử chạy vào '{tgt_schema}._etl_run_history': {e}")
+
+
+def send_alert_webhook(message):
+    if not ALERT_WEBHOOK_URL:
+        return
+    try:
+        payload = json.dumps({"content": message, "text": message}).encode("utf-8")
+        req = urllib.request.Request(
+            ALERT_WEBHOOK_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+        logger.info("[ALERT WEBHOOK] Đã gửi thông báo cảnh báo qua Webhook thành công.")
+    except Exception as e:
+        logger.warning(f"[ALERT WEBHOOK] Không thể gửi thông báo qua Webhook: {e}")

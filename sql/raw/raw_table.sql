@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS {schema}.olist_order_reviews_dataset (
 
 CREATE INDEX IF NOT EXISTS idx_reviews_creation_date ON {schema}.olist_order_reviews_dataset (review_creation_date);
 
+CREATE INDEX IF NOT EXISTS idx_customers_pk_extracted ON {schema}.olist_customers_dataset (customer_id, _extracted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_products_pk_extracted ON {schema}.olist_products_dataset (product_id, _extracted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sellers_pk_extracted ON {schema}.olist_sellers_dataset (seller_id, _extracted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_pk_extracted ON {schema}.olist_orders_dataset (order_id, _extracted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_items_pk_extracted ON {schema}.olist_order_items_dataset (order_id, order_item_id, _extracted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payments_pk_extracted ON {schema}.olist_order_payments_dataset (order_id, payment_sequential, _extracted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_pk_extracted ON {schema}.olist_order_reviews_dataset (review_id, order_id, _extracted_at DESC);
+
 CREATE TABLE IF NOT EXISTS {schema}._etl_watermarks (
     logical_name     VARCHAR(50) PRIMARY KEY,
     target_table     VARCHAR(100) NOT NULL,
@@ -91,4 +99,17 @@ CREATE TABLE IF NOT EXISTS {schema}._etl_watermarks (
     last_watermark   TIMESTAMP NOT NULL,
     last_batch_id    VARCHAR(64),
     updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS {schema}._etl_run_history (
+    batch_id       VARCHAR(64) NOT NULL,
+    logical_name   VARCHAR(50) NOT NULL,
+    source_table   VARCHAR(100),
+    target_table   VARCHAR(100),
+    strategy       VARCHAR(30),
+    loaded_rows    BIGINT,
+    elapsed_sec    NUMERIC(10, 2),
+    status         TEXT,
+    recorded_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (batch_id, logical_name)
 );
