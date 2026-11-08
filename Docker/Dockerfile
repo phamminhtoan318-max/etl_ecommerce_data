@@ -21,9 +21,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 3. Copy toàn bộ mã nguồn
 COPY . .
 
-# 4. Cấu hình môi trường mặc định
+# 4. Cấu hình môi trường mặc định & non-root user bảo mật
 ENV PYTHONUNBUFFERED=1 \
     SRC_DB_TRUSTED_CONNECTION=no
+
+RUN useradd --create-home --shell /bin/bash etluser \
+    && mkdir -p /app/logs \
+    && chown -R etluser:etluser /app
+
+USER etluser
 
 # 5. Lệnh chạy toàn bộ pipeline (Extract-Load -> dbt run -> dbt test)
 CMD ["bash", "run.sh", "pipeline"]

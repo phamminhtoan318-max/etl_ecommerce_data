@@ -4,7 +4,6 @@ data/
 __pycache__
 logs/ 
 docs/*.bkp
-*.txt
 dbt_transform/target/
 dbt_transform/logs/
 dbt_transform/dbt_packages/
