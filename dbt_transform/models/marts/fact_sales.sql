@@ -43,3 +43,7 @@ left join {{ ref('dim_product') }} dp
     on oi.product_id = dp.product_id
 left join {{ ref('dim_seller') }} ds
     on oi.seller_id = ds.seller_id
+    and (
+        (o.purchased_at is not null and o.purchased_at >= ds.valid_from and o.purchased_at < ds.valid_to)
+        or (o.purchased_at is null and ds.is_current = true)
+    )

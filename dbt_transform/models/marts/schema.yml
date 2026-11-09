@@ -43,16 +43,16 @@ models:
           - not_null
 
   - name: dim_seller
-    description: "Bảng chiều người bán (Seller Dimension)"
+    description: "Bảng chiều người bán áp dụng SCD Type 2 từ dbt snapshot (Seller Dimension)"
     config:
       indexes:
         - columns: ['seller_key']
           unique: true
-        - columns: ['seller_id']
+        - columns: ['seller_id', 'valid_from', 'valid_to']
         - columns: ['location_key']
     columns:
       - name: seller_key
-        description: "Khóa chính thay thế của người bán"
+        description: "Khóa chính thay thế theo từng phiên bản lịch sử của người bán"
         tests:
           - unique
           - not_null
