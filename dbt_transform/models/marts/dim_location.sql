@@ -15,7 +15,7 @@ with all_locations as (
 )
 
 select
-    md5(concat(city_name, '-', state_code))::uuid as location_key,
+    {{ dbt_utils.generate_surrogate_key(['city_name', 'state_code']) }}::uuid as location_key,
     city_name,
     state_code
 from all_locations

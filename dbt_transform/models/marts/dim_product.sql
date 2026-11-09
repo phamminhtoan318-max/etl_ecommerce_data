@@ -3,7 +3,7 @@ with products as (
 )
 
 select
-    md5(product_id)::uuid as product_key,
+    {{ dbt_utils.generate_surrogate_key(['product_id']) }}::uuid as product_key,
     product_id,
     product_category_name,
     round((product_weight_g / 1000.0)::numeric, 4) as weight_kg,

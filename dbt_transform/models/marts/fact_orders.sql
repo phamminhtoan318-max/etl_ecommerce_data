@@ -35,7 +35,7 @@ reviews_agg as (
 )
 
 select
-    md5(o.order_id)::uuid as order_key,
+    {{ dbt_utils.generate_surrogate_key(['o.order_id']) }}::uuid as order_key,
     o.order_id,
     coalesce(dc.customer_key, '00000000-0000-0000-0000-000000000000'::uuid) as customer_key,
     coalesce(dl.location_key, '00000000-0000-0000-0000-000000000000'::uuid) as shipping_location_key,

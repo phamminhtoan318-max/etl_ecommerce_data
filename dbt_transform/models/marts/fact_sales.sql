@@ -11,7 +11,7 @@ customers_stg as (
 )
 
 select
-    md5(concat(oi.order_id, '-', oi.order_item_id))::uuid as sales_key,
+    {{ dbt_utils.generate_surrogate_key(['oi.order_id', 'oi.order_item_id']) }}::uuid as sales_key,
     oi.order_id,
     oi.order_item_id,
     coalesce(dc.customer_key, '00000000-0000-0000-0000-000000000000'::uuid) as customer_key,

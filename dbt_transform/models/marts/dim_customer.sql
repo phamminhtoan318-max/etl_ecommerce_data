@@ -61,7 +61,7 @@ scd_calculated as (
 )
 
 select
-    md5(concat(customer_unique_id, '-', valid_from::text))::uuid as customer_key,
+    {{ dbt_utils.generate_surrogate_key(['customer_unique_id', 'valid_from']) }}::uuid as customer_key,
     customer_unique_id,
     coalesce(location_key, '00000000-0000-0000-0000-000000000000'::uuid) as location_key,
     valid_from,
