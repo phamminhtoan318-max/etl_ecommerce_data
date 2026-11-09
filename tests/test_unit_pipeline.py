@@ -95,6 +95,33 @@ class TestSchemaContractAndEvolution(unittest.TestCase):
         self.assertEqual(CHECKPOINT_TABLE, "_pipeline_checkpoints")
         self.assertEqual(CHUNK_LOG_TABLE, "_pipeline_chunk_checkpoints")
 
+    def test_dbt_runner_strip_ansi_and_error_capture(self):
+        from src.transformation.dbt_runner import _format_and_log_dbt_line, strip_ansi
+
+        raw_line = "\x1b[0m17:20:50  1 of 7 OK created sql incremental model silver.stg_sellers \x1b[32mSELECT 3095\x1b[0m in 0.24s]"
+        self.assertNotIn("\x1b", strip_ansi(raw_line))
+
+        errors = []
+        _format_and_log_dbt_line(
+            "17:20:51  1 of 1 ERROR snapshotting silver.snp_sellers ........................ [ERROR in 0.12s]",
+            "DBT SNAPSHOT",
+            error_details=errors,
+        )
+        _format_and_log_dbt_line(
+            "17:20:51  Database Error in model fact_sales (models/marts/fact_sales.sql)",
+            "DBT GOLD",
+            error_details=errors,
+        )
+        _format_and_log_dbt_line(
+            "  LINE 15: division by zero",
+            "DBT GOLD",
+            error_details=errors,
+        )
+        self.assertEqual(len(errors), 3)
+        self.assertIn("silver.snp_sellers", errors[0])
+        self.assertIn("Database Error in model fact_sales", errors[1])
+        self.assertIn("LINE 15: division by zero", errors[2])
+
 
 if __name__ == "__main__":
     unittest.main()
