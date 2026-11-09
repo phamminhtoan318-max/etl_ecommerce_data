@@ -268,9 +268,10 @@ etl_ecommerce_data/
 .\.venv\Scripts\python.exe main.py --sequential
 
 # 4. Chạy riêng lẻ các tầng dbt với định dạng log chuẩn hóa:
-.\.venv\Scripts\python.exe -m src.dbt_runner silver    # Chỉ chạy tầng Silver
-.\.venv\Scripts\python.exe -m src.dbt_runner gold      # Chỉ chạy tầng Gold
-.\.venv\Scripts\python.exe -m src.dbt_runner test      # Chạy toàn bộ bài test dbt
+.\.venv\Scripts\python.exe -m src.transformation.dbt_runner silver    # Chỉ chạy tầng Silver
+.\.venv\Scripts\python.exe -m src.transformation.dbt_runner snapshot  # Chạy dbt Snapshot (SCD Type 2)
+.\.venv\Scripts\python.exe -m src.transformation.dbt_runner gold      # Chỉ chạy tầng Gold
+.\.venv\Scripts\python.exe -m src.transformation.dbt_runner test      # Chạy toàn bộ bài test dbt
 ```
 
 #### Lựa chọn 2: Sử dụng Unified CLI qua `run.sh` (Linux / macOS / Git Bash)
@@ -322,7 +323,7 @@ Kiểm tra tính hợp lệ của hợp đồng Schema, câu truy vấn trích x
 ### 5.3. Chạy Kiểm thử Chất lượng Dữ liệu dbt
 Thực thi toàn bộ các bài test schema và quy tắc nghiệp vụ:
 ```powershell
-.\.venv\Scripts\python.exe -m src.dbt_runner test
+.\.venv\Scripts\python.exe -m src.transformation.dbt_runner test
 # Hoặc qua run.sh:
 ./run.sh test
 ```

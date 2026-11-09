@@ -39,23 +39,23 @@ resume_load() {
 }
 
 transform_silver() {
-    "$PYTHON" -m src.dbt_runner silver
+    "$PYTHON" -m src.transformation.dbt_runner silver
 }
 
 transform_snapshot() {
-    "$PYTHON" -m src.dbt_runner snapshot
+    "$PYTHON" -m src.transformation.dbt_runner snapshot
 }
 
 transform_gold() {
-    "$PYTHON" -m src.dbt_runner gold
+    "$PYTHON" -m src.transformation.dbt_runner gold
 }
 
 test_models() {
-    "$PYTHON" -m src.dbt_runner test
+    "$PYTHON" -m src.transformation.dbt_runner test
 }
 
 transform() {
-    "$PYTHON" -m src.dbt_runner all
+    "$PYTHON" -m src.transformation.dbt_runner all
 }
 
 unit_test() {
