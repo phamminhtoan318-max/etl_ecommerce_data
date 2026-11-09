@@ -1,5 +1,17 @@
+{{ config(
+    materialized='incremental',
+    unique_key='seller_id',
+    incremental_strategy='delete+insert'
+) }}
+
 with source as (
     select * from {{ source('bronze', 'olist_sellers_dataset') }}
+    {% if is_incremental() %}
+        where _extracted_at > (
+            select coalesce(max(_extracted_at), '1900-01-01'::timestamp)
+            from {{ this }}
+        )
+    {% endif %}
 ),
 
 deduped as (
