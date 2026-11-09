@@ -15,9 +15,7 @@ from src.load import load_single_table
 from src.logger import get_logger
 from src.schema import (
     SchemaValidationError,
-    cleanup_temp_schemas,
-    execute_atomic_swap,
-    prepare_staging_schema,
+    init_bronze_schema,
 )
 from src.validate.validate_pipeline import measure_source_baseline, validate_staging_against_baseline
 
@@ -51,7 +49,7 @@ def _process_single_table_worker(
     batch_id,
     src_engine,
     tgt_engine,
-    tmp_schema,
+    target_schema,
 ):
     rule = dict(rule_template)
     actual_name = base_info["actual_table_name"]
@@ -88,7 +86,7 @@ def _process_single_table_worker(
         rule=rule,
         chunk_stream=chunk_stream,
         tgt_engine=tgt_engine,
-        tgt_schema=tmp_schema,
+        tgt_schema=target_schema,
     )
     return logical_name, stat
 
@@ -100,10 +98,7 @@ def main():
     pipeline_stats = {}
 
     target_schema = TGT_DB_SCHEMA
-    tmp_schema = f"{target_schema}_staging_tmp"
-    backup_schema = f"{target_schema}_old"
     tgt_engine = None
-    resume_mode = "--resume" in sys.argv
     sequential_mode = "--sequential" in sys.argv or ETL_MAX_WORKERS <= 1
 
     logger.info(f"🚀 BẮT ĐẦU CHẠY PIPELINE (BATCH ID: {batch_id})")
@@ -113,17 +108,9 @@ def main():
         tgt_engine = get_target_engine()
         src_engine = get_source_engine()
 
-        prepare_staging_schema(
-            tgt_engine=tgt_engine,
-            tmp_schema=tmp_schema,
-            target_schema=target_schema,
-            resume=resume_mode,
-        )
+        init_bronze_schema(tgt_engine, target_schema=target_schema)
 
         watermark_states = get_watermark_states(tgt_engine, tgt_schema=target_schema)
-        if resume_mode:
-            tmp_watermarks = get_watermark_states(tgt_engine, tgt_schema=tmp_schema)
-            watermark_states.update(tmp_watermarks)
 
         source_baseline = measure_source_baseline(watermark_states=watermark_states, batch_time=batch_time)
 
@@ -134,7 +121,7 @@ def main():
                 source_baseline=source_baseline,
             ):
                 pipeline_stats[logical_name] = load_single_table(
-                    logical_name, actual_name, rule, chunk_stream, tgt_engine, tgt_schema=tmp_schema
+                    logical_name, actual_name, rule, chunk_stream, tgt_engine, tgt_schema=target_schema
                 )
         else:
             logger.info(f"⚡ [CONCURRENT EL] Kích hoạt trích xuất & nạp song song ({ETL_MAX_WORKERS} workers)...")
@@ -150,7 +137,7 @@ def main():
                         batch_id,
                         src_engine,
                         tgt_engine,
-                        tmp_schema,
+                        target_schema,
                     )
                     for logical_name, base_info in source_baseline.items()
                 ]
@@ -164,20 +151,11 @@ def main():
         validate_staging_against_baseline(
             source_baseline=source_baseline,
             pipeline_stats=pipeline_stats,
-            tgt_schema=tmp_schema,
+            tgt_schema=target_schema,
             tgt_engine=tgt_engine,
         )
-
-        execute_atomic_swap(
-            tgt_engine=tgt_engine,
-            tmp_schema=tmp_schema,
-            target_schema=target_schema,
-            backup_schema=backup_schema,
-        )
-
 
         mark_all_checkpoints_completed(tgt_engine, pipeline_stats=pipeline_stats, batch_id=batch_id)
-        cleanup_temp_schemas(tgt_engine, tmp_schema, backup_schema)
 
         save_pipeline_run_history(
             tgt_engine=tgt_engine,
@@ -211,7 +189,6 @@ def main():
         )
         logger.error(err_msg)
         send_alert_webhook(err_msg)
-        cleanup_temp_schemas(tgt_engine, tmp_schema, backup_schema)
         sys.exit(1)
     except Exception as exc:
         total_elapsed = time.time() - pipeline_start
@@ -219,10 +196,9 @@ def main():
         logger.error(err_msg)
         send_alert_webhook(err_msg)
 
-
         logger.warning(
-            f"💾 [FAULT TOLERANCE] Giữ nguyên dữ liệu các chunk đã commit trong '{tmp_schema}'. "
-            f"Hệ thống sẽ tự động khôi phục và nạp tiếp từ mốc Checkpoint ở lần chạy sau!"
+            f"💾 [FAULT TOLERANCE] Dữ liệu các chunk đã commit được bảo toàn trong '{target_schema}'. "
+            f"Checkpoint được lưu trong metadata, hệ thống sẽ tự động khôi phục ở lần chạy sau!"
         )
         sys.exit(1)
     finally:

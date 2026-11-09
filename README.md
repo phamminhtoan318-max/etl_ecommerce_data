@@ -6,404 +6,174 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![SQL Server](https://img.shields.io/badge/SQL_Server-2022-CC292B.svg?style=flat&logo=microsoftsqlserver&logoColor=white)](https://www.microsoft.com/sql-server)
 
-An enterprise-grade, end-to-end, production-ready **Medallion Data Pipeline (Bronze -> Silver -> Gold)** designed to ingest, validate, audit, and model over 100,000 real-world commercial transactions from Microsoft SQL Server (OLTP) into a PostgreSQL Data Warehouse, transformed into Kimball-standard Unified Star Schema Marts using dbt Core.
+Hệ thống Data Engineering chuẩn doanh nghiệp theo mô hình **Medallion Architecture (Bronze -> Silver -> Gold)**, trích xuất dữ liệu giao dịch thương mại điện tử từ Microsoft SQL Server (OLTP), nạp trực tiếp vào PostgreSQL Data Warehouse theo cơ chế **Bronze Append-Only**, khử trùng lặp và làm sạch tại tầng **Silver**, sau đó mô hình hóa thành **Kimball Star Schema** tại tầng **Gold** bằng dbt Core.
 
 ---
 
-## 1. Project Overview
+## 1. Tổng quan Kiến trúc Pipeline (Architecture Overview)
 
-This project delivers a resilient, fault-tolerant Data Engineering pipeline adopting the **Medallion Architecture** that bridges transactional operations and enterprise business intelligence. 
+Dự án áp dụng kiến trúc **Medallion (Lakehouse-style)** nhằm giải quyết dứt điểm các hạn chế của quy trình ETL truyền thống:
 
-### Key Highlights:
-- **Pure Raw Bronze Ingestion**: Ingests 100% faithful raw data from SQL Server into PostgreSQL `bronze` without dropping rows or filtering on RAM. Automatically appends audit metadata (`_batch_id` and `_extracted_at`), enabling zero-touch replays when downstream logic changes.
-- **Zero-Downtime Atomic Swaps**: Blue-Green schema swapping (`bronze_staging_tmp` -> `bronze`) ensures downstream consumers and dbt transformations never query incomplete or empty staging tables during ingestion.
-- **SQL-Based Silver Deduplication & Cleaning**: Pushes data cleaning, type casting, string trimming, NULL PK filtering, and deduplication (`ROW_NUMBER() OVER (...)`) entirely into dbt SQL models inside PostgreSQL `silver`.
-- **Unified Gold Star Schema**: Consolidates all 5 Dimensions (including Slowly Changing Dimensions SCD Type 2 for customer relocation tracking) and 2 Fact tables into a single unified schema (`gold`), eliminating unnecessary mart fragmentation.
-- **Unified Logging Architecture**: Powered by `src/dbt_runner.py`, intercepts all real-time dbt model runs and test assertions, formatting them into consistent, human-readable logs persisted in a single rotation log file (`logs/pipeline.log`).
-- **Comprehensive Quality Assurance**: Over 100 automated data tests in dbt alongside a 2-tier pre/post-load baseline audit, storing any test failure records directly into a dedicated database audit schema (`test_failures`).
-
----
-
-## 2. Business Problem
-
-Olist operates the largest department store marketplace in Brazilian e-commerce, connecting thousands of merchants with millions of customers. The operational OLTP system (running on Microsoft SQL Server) was experiencing significant challenges:
-
-1. **Transactional Database Contention**: Analytical queries run directly by marketing, finance, and logistics teams caused severe lock contention and CPU spikes on production transactional databases.
-2. **Data Integrity Hazards & Out-of-Order Events**: Real-world operations suffered from out-of-order order confirmations, review updates arriving days after delivery, and multiple payment methods per order.
-3. **Customer Relocation Tracking (Data Drift)**: Customers moved cities between orders. Without SCD Type 2 tracking, analytical aggregations credited historical revenues to current addresses, producing skewed regional logistics insights.
-4. **Pipeline Vulnerability**: Frequent upstream database changes (adding marketing tags, altering columns) regularly caused traditional ETL scripts to crash, resulting in hours of stale data and missing metrics.
+### Các tính năng cốt lõi (Key Features):
+* **Bronze Append-Only Ingestion**: Nạp dữ liệu thô nguyên bản $100\%$ từ SQL Server vào PostgreSQL `bronze` mà không lọc bỏ dòng hay đè dữ liệu. Không mắc "Nghịch lý Incremental" (loại bỏ hoàn toàn việc copy 1 triệu dòng cũ sang staging), chỉ nạp đúng phần delta phát sinh ($O(\Delta N)$).
+* **In-Transaction Atomic Checkpoint & Watermark**: Mỗi chunk nạp vào và mốc checkpoint trong `etl_metadata._pipeline_checkpoints` được thực thi trong **cùng 1 Transaction ACID**. Khi có sự cố, chunk lỗi tự động rollback, các chunk đã commit trước đó được bảo toàn, cho phép resume chính xác ở lần chạy sau.
+* **Data Versioning & Audit Trail**: Lưu trữ toàn bộ lịch sử biến động trạng thái đơn hàng (ví dụ: `created` -> `shipped` -> `delivered`) với siêu dữ liệu `_batch_id` và `_extracted_at`, phục vụ truy vết kiểm toán và phân tích chuỗi sự kiện.
+* **Khử trùng lặp tại tầng Silver dbt (SQL-based Deduplication)**: Chuyển toàn bộ tải tính toán làm sạch, ép kiểu và khử trùng lặp về tầng Silver qua `ROW_NUMBER() OVER (PARTITION BY pk ORDER BY _extracted_at DESC)`. Đảm bảo tính **Idempotency tuyệt đối**.
+* **Unified Gold Star Schema (Kimball)**: Hợp nhất toàn bộ 5 bảng Dimension (bao gồm SCD Type 2 theo dõi khách hàng chuyển địa điểm) và 2 bảng Fact vào một schema duy nhất (`gold`).
+* **Trích xuất đồng thời (Concurrent Extraction)**: Hỗ trợ `ThreadPoolExecutor` nạp song song nhiều bảng, kết hợp cơ chế thử lại (exponential backoff retry) khi kết nối mạng chập chờn.
+* **Unified Logging UTC**: Đồng bộ hóa toàn bộ luồng log giữa Python EL và dbt CLI theo chuẩn giờ UTC (`%Y-%m-%d %H:%M:%S UTC`) được lưu trữ tại `logs/pipeline.log`.
+* **Khung kiểm thử chất lượng 4 tầng (4-Tier Quality Framework)**: Phủ kín từ kiểm tra độ tươi mới (freshness) tầng nguồn, hợp lệ tầng Silver, toàn vẹn khóa tầng Marts đến đối chiếu doanh thu, số lượng đơn hàng tầng Gold.
 
 ---
 
-## 3. Project Objectives
-
-- [x] **Decouple Analytics from OLTP**: Offload analytical workloads completely into an optimized PostgreSQL Data Warehouse.
-- [x] **Eliminate Ingestion Downtime**: Achieve 0.05-second atomic schema swaps so end-users never experience empty staging tables during refreshes.
-- [x] **Guarantee Idempotency & Fault Tolerance**: Enable arbitrary pipeline restarts with per-chunk checkpointing and watermark persistence, avoiding full re-extracts.
-- [x] **Implement Enterprise Dimensional Models**: Build high-performance Fact and Dimension tables aligned with business KPIs: Gross Merchandise Value (GMV), Freight Ratios, Delivery Timeliness, and Customer Lifetime Value (CLV).
-- [x] **Automate 100% Data Testing**: Deploy automated constraints, referential integrity tests, domain accepted values, and revenue balance cross-table tests.
-- [x] **Full Infrastructure Containerization**: Package the entire pipeline into reproducible Docker containers with Microsoft ODBC Driver 18 and automated bash runners.
-
----
-
-## 4. Tech Stack
-
-| Category | Technology | Version | Purpose |
-|---|---|---|---|
-| **Programming Language** | Python | 3.11+ | Pipeline orchestration, data validation, streaming extraction |
-| **Database Connectors** | SQLAlchemy, pyodbc | 2.0+ / 5.0+ | Database engine abstraction and connection pooling |
-| **ODBC Driver** | Microsoft ODBC Driver | 18 for SQL Server | High-performance enterprise connectivity to SQL Server |
-| **Data Processing** | pandas | 2.2+ | In-memory batch chunking and generator streaming |
-| **Source Database (OLTP)** | Microsoft SQL Server | 2019/2022 | Production transactional relational database |
-| **Target Database (DWH)** | PostgreSQL | 16 | Bronze raw store, Silver cleaned store, Gold Star Schema |
-| **Transformation & Modeling** | dbt Core (dbt-postgres) | 1.12.6 / 1.11.0 | ELT SQL transformations, lineage DAG, data quality tests |
-| **Containerization** | Docker & Docker Compose | Latest | Reproducible environments, cross-platform deployment |
-| **Operating System Support** | Windows 11 & Linux/macOS | - | Cross-platform execution with strict LF `.gitattributes` |
-
----
-
-## 5. Data Sources
-
-The source dataset is the renowned **Brazilian E-Commerce Public Dataset by Olist** (~100,000 orders spanning 2016 to 2018):
-
-```
-       +-----------------------+       +-------------------------+
-       |   olist_customers     |       |    olist_sellers        |
-       |-----------------------|       |-------------------------|
-       | PK customer_id        |       | PK seller_id            |
-       |    customer_unique_id |       |    seller_zip_code      |
-       |    customer_city/state|       |    seller_city/state    |
-       +-----------+-----------+       +------------+------------+
-                   | 1                              | 1
-                   |                                |
-                   | N                              | N
-       +-----------v-----------+       +------------v------------+
-       |     olist_orders      | 1   N |    olist_order_items    |
-       |-----------------------+-------+-------------------------|
-       | PK order_id           |       | PK,FK order_id          |
-       | FK customer_id        |       | PK    order_item_id     |
-       |    order_status       |       | FK    product_id        |
-       |    order_purchase_ts  |       | FK    seller_id         |
-       |    order_approved_at  |       |       price, freight    |
-       +-----------+-----------+       +------------+------------+
-                   | 1                              | N
-         +---------+---------+                      |
-       1 | N               1 | N                    | 1
-+--------v--------+ +--------v--------+    +--------v--------+
-|  order_payments | |  order_reviews  |    |  olist_products |
-|-----------------| |-----------------|    |-----------------|
-| PK order_id     | | PK,FK order_id  |    | PK product_id   |
-| PK payment_seq  | | PK    review_id |    |    category_name|
-|    payment_type | |       score     |    |    weight, dim  |
-+-----------------+ +-----------------+    +-----------------+
-```
-
-| Source Table Name | Approximate Rows | Grain / Primary Key | Description |
-|---|---|---|---|
-| `olist_customers_dataset` | 99,441 | `customer_id` | Customer checkout transactions and geographic locations |
-| `olist_orders_dataset` | 99,441 | `order_id` | Core lifecycle timestamps (purchase, approve, deliver) |
-| `olist_order_items_dataset` | 112,650 | `(order_id, order_item_id)` | Line items detailing product, seller, price, and shipping freight |
-| `olist_order_payments_dataset` | 103,886 | `(order_id, payment_sequential)` | Payment methods (credit card, voucher, boleto), installments, value |
-| `olist_order_reviews_dataset` | 99,224 | `(review_id, order_id)` | Customer feedback, 1-5 star ratings, and review response timestamps |
-| `olist_products_dataset` | 32,951 | `product_id` | Product catalog metadata, categories, dimensions, and weights |
-| `olist_sellers_dataset` | 3,095 | `seller_id` | Merchant locations, zip codes, and regional registration |
-
----
-
-## 6. Data Pipeline Architecture
+## 2. Mô tả Luồng Xử lý Dữ liệu Hiện tại (Current Data Flow)
 
 ```mermaid
 flowchart TD
     subgraph S1["1. Upstream OLTP Layer"]
-        SS["SQL Server (OLTP)"]
+        SS["SQL Server (OLTP Database)<br/>100,000+ Records"]
     end
 
-    subgraph S2["2. Ingestion & Quality Guard (Python)"]
-        BC["Pre-flight Baseline & Contract Check<br/>(contract.py)"]
-        EX["Chunked Streaming Generator<br/>(25,000 rows/batch, Cutoff Timestamp)"]
-        META["Append Audit Lineage<br/>(_batch_id, _extracted_at)"]
-        SE["Target Schema Evolution<br/>(evolution.py)"]
+    subgraph S2["2. Ingestion & Quality Guard (Python Engine)"]
+        direction TB
+        BC["Pre-flight Baseline & Schema Contract<br/>(contract.py)"]
+        INIT["Bootstrap Schema DDL<br/>(init_schema.py)"]
+        EX["Concurrent Chunked Streamer<br/>(extract.py + ThreadPoolExecutor)"]
+        EVO["Target Dynamic Schema Evolution<br/>(evolution.py)"]
         SS --> BC
-        BC --> EX
-        EX --> META
-        META --> SE
+        BC --> INIT
+        INIT --> EX
+        EX --> EVO
     end
 
     subgraph S3["3. PostgreSQL Bronze Layer (schema: bronze)"]
-        TMP["Blue-Green Draft Schema<br/>(bronze_staging_tmp)"]
-        AUD["2-Tier Row Count Audit<br/>(validate_target.py)"]
-        SWP["Atomic 0.05s Schema Swap<br/>(swap.py)"]
-        BRZ["Immutable Bronze Raw Store<br/>(bronze)"]
-        SE --> TMP
-        TMP --> AUD
-        AUD --> SWP
-        SWP --> BRZ
+        direction TB
+        BRZ["Immutable Bronze Raw Store (Append-Only)<br/>(schema: bronze)"]
+        CKP["In-Transaction ACID Checkpointing<br/>(etl_metadata._pipeline_checkpoints)"]
+        AUD["2-Tier Row Count Baseline Audit<br/>(validate_target.py)"]
+        EVO --> BRZ
+        BRZ <--> CKP
+        BRZ --> AUD
     end
 
     subgraph S4["4. dbt Silver Layer (schema: silver)"]
-        STG["Cleaned & Deduped Tables<br/>(stg_customers, stg_orders, stg_items...)"]
-        BRZ -->|"dbt run --select staging"| STG
+        STG["Cleaned & Deduped Models<br/>(ROW_NUMBER Deduplication, Cast, Trim)"]
+        AUD -->|"dbt run --select staging"| STG
     end
 
     subgraph S5["5. dbt Gold Layer (schema: gold)"]
-        GOLD["Unified Star Schema Marts<br/>5 Dims (SCD2) + 2 Facts"]
-        TST["Audit Failure Schema<br/>(schema: test_failures)"]
+        GOLD["Kimball Unified Star Schema Marts<br/>5 Dims (dim_customer SCD2) + 2 Facts"]
+        TST["Multi-Tier Automated Test Guard<br/>(dbt test -> test_failures schema)"]
         STG -->|"dbt run --select marts"| GOLD
         STG -.->|"dbt test"| TST
         GOLD -.->|"dbt test"| TST
     end
 
-    subgraph S6["6. Business Intelligence & Analytics"]
+    subgraph S6["6. Business Intelligence & Reporting"]
         BI["Dashboards & Self-Service BI<br/>PowerBI / Metabase / Tableau"]
         GOLD --> BI
     end
 ```
 
----
-
-## 7. Data Processing Workflow
-
-The entire lifecycle executes through a clean, decoupled 11-step workflow:
-
-```
-[Start]
-   │
-   ▼
-1. Connection Verification   ──► Verify credentials for SQL Server (ODBC 18) and PostgreSQL.
-   │
-   ▼
-2. Checkpoint Discovery     ──► Read latest watermark timestamps from `_etl_watermarks`.
-   │
-   ▼
-3. Blue-Green Staging Prep  ──► Recreate `bronze_staging_tmp`, copy watermark states & base incremental tables.
-   │
-   ▼
-4. Source Baseline Probe    ──► Measure exact row counts from SQL Server under `READ COMMITTED`.
-   │
-   ▼
-5. Stream Extract & Load    ──► Stream chunks (25k rows), attach `_batch_id` & `_extracted_at`, COPY directly to temp schema.
-   │
-   ▼
-6. Integrity Check          ──► Ensure 100% of required tables loaded completely without drops.
-   │
-   ▼
-7. 2-Tier Baseline Audit    ──► Verify `stg_rows >= expected` and `loaded_rows == stg_rows` (zero data loss).
-   │
-   ▼
-8. Atomic Schema Swap       ──► Swap `bronze_staging_tmp` into `bronze` in 0.05s via catalog rename.
-   │
-   ▼
-9. dbt Silver Execution     ──► Build `silver.stg_*` models: filter NULL PKs, dedup via `ROW_NUMBER()`.
-   │
-   ▼
-10. dbt Gold Execution      ──► Build `gold.dim_*` (including SCD2) and `gold.fact_*` Unified Star Schema.
-   │
-   ▼
-11. Automated Data Testing  ──► Execute 100+ tests; isolate any violations into `test_failures`.
-```
+### Các bước vận hành chi tiết:
+1. **Kiểm tra kết nối & Tiền điều kiện (Pre-flight Checks)**: Xác thực cổng mạng, kiểm tra quyền truy cập SQL Server (ODBC Driver 18) và PostgreSQL 16.
+2. **Khởi tạo & Đồng bộ Cấu trúc (Schema Initialization & Evolution)**:
+   * Chạy [init_bronze_schema](file:///d:/code/personal_project/etl_ecommerce_data/src/schema/init_schema.py) tạo bảng `CREATE TABLE IF NOT EXISTS` trong schema `bronze`.
+   * Tự động phát hiện và thêm cột mới (`ALTER TABLE ADD COLUMN`) vào Bronze nếu schema nguồn có cập nhật.
+3. **Đọc Checkpoint & Xác định dải Watermark**:
+   * Kiểm tra bảng `etl_metadata._pipeline_checkpoints` và `bronze._etl_watermarks` để xác định mốc dữ liệu đã commit gần nhất.
+4. **Đo lường Baseline Nguồn (Source Baseline Probe)**:
+   * Kiểm đếm số dòng thực tế từ SQL Server dưới mức cô lập `READ COMMITTED`.
+5. **Trích xuất & Nạp dòng song song (Concurrent Extract & Load)**:
+   * Phân luồng `ThreadPoolExecutor` xử lý đồng thời nhiều bảng.
+   * Nạp trực tiếp từng chunk vào bảng `bronze` qua PostgreSQL COPY Protocol siêu tốc.
+   * Commit dữ liệu chunk và mốc checkpoint trong **cùng 1 Transaction ACID**.
+6. **Kiểm toán số dòng 2 tầng (2-Tier Baseline Audit)**:
+   * Đối chiếu số dòng đã nạp với baseline để phát hiện thất thoát dữ liệu ngay tại đích đến.
+7. **Biến đổi & Khử trùng lặp tại tầng Silver dbt**:
+   * Lọc bản ghi hợp lệ, ép kiểu, chuẩn hóa chuỗi và chọn bản ghi mới nhất qua `ROW_NUMBER() OVER (PARTITION BY pk ORDER BY _extracted_at DESC)`.
+8. **Mô hình hóa Star Schema tại tầng Gold & Chạy bộ Test 4 tầng**:
+   * Xây dựng Dimension (SCD Type 2 cho khách hàng) và Fact tables.
+   * Chạy bộ test tự động đối chiếu doanh thu, số lượng đơn và lưu các dòng vi phạm vào schema `test_failures`.
 
 ---
 
-## 8. Data Modeling
-
-The analytical layer adopts the **Kimball Dimensional Modeling** methodology. Data is modeled into a Star Schema optimized for high-throughput OLAP reporting:
-
-```mermaid
-erDiagram
-    dim_customer ||--o{ fact_orders : "places (SCD2)"
-    dim_location ||--o{ fact_orders : "ships_to"
-    dim_date     ||--o{ fact_orders : "purchased_on"
-    dim_date     ||--o{ fact_orders : "approved_on"
-    dim_date     ||--o{ fact_orders : "delivered_on"
-
-    dim_product  ||--o{ fact_sales  : "contains"
-    dim_seller   ||--o{ fact_sales  : "sold_by"
-    dim_customer ||--o{ fact_sales  : "bought_by"
-    dim_location ||--o{ fact_sales  : "shipped_to"
-    dim_date     ||--o{ fact_sales  : "sold_on"
-
-    fact_orders {
-        uuid order_key PK
-        string order_id
-        uuid customer_key FK
-        uuid shipping_location_key FK
-        int purchase_date_key FK
-        int approved_date_key FK
-        int delivered_date_key FK
-        string order_status
-        string payment_type
-        string delivery_status
-        int total_items_count
-        numeric total_items_amount
-        numeric total_freight_amount
-        numeric total_order_amount
-        numeric total_payment_value
-        numeric review_score
-    }
-
-    fact_sales {
-        uuid sales_key PK
-        string order_id
-        int order_item_id
-        uuid product_key FK
-        uuid seller_key FK
-        uuid customer_key FK
-        uuid shipping_location_key FK
-        int purchase_date_key FK
-        numeric item_price
-        numeric freight_value
-        numeric total_sales_amount
-    }
-
-    dim_customer {
-        uuid customer_key PK
-        string customer_unique_id
-        uuid location_key FK
-        timestamp valid_from
-        timestamp valid_to
-        boolean is_current
-    }
-
-    dim_date {
-        int date_key PK
-        date full_date
-        int year
-        int quarter
-        int month
-        string month_name
-        string day_of_week_name
-        boolean is_weekend
-    }
-
-    dim_product {
-        uuid product_key PK
-        string product_id
-        string product_category_name
-        numeric weight_kg
-        numeric volume_m3
-    }
-
-    dim_seller {
-        uuid seller_key PK
-        string seller_id
-        uuid location_key FK
-    }
-
-    dim_location {
-        uuid location_key PK
-        string city_name
-        string state_code
-    }
-```
-
-### Notable Modeling Techniques:
-1. **Slowly Changing Dimension Type 2 (`dim_customer.sql`)**: Tracks customer relocations across cities. Utilizes `is distinct from` to safely capture state transitions involving `NULL` values.
-2. **Deterministic Tie-Breaker Aggregations (`fact_orders.sql`)**: Resolves orders with multi-tender payments of identical values deterministically using:
-   ```sql
-   (array_agg(payment_type order by payment_value desc, payment_type asc, payment_sequential asc))[1] as payment_type
-   ```
-3. **Smart Date Key Dimension (`dim_date.sql`)**: Generates 5,844 dates (2015-01-01 to 2030-12-31) formatted with `FMMonth` and `FMDay` for locale-independent English calendar reporting.
-4. **Automated B-Tree & Unique Indexes (`marts/schema.yml`)**: Materializes unique indexes on primary surrogate keys and B-Tree indexes on foreign keys, speeding up multi-table dashboard joins by 5x-10x.
-
----
-
-## 9. Data Quality and Validation
-
-The pipeline deploys a multi-barrier defense mechanism covering all stages:
-
-```
-[Layer 1: Upstream SQL Tests]
-  ├── Zero NULL Primary Keys across all 7 tables
-  └── Zero Duplicate PKs across single & composite keys
-
-[Layer 2: Schema Contract Enforcement]
-  ├── Mandatory PK & Watermark Column verification on Source
-  ├── Selected Column Mode protection
-  └── Forbidden Exclude validation
-
-[Layer 3: 2-Tier Baseline Row Count Audit]
-  ├── Tier 1 (stg_rows >= expected): Allows natural source growth during extraction
-  └── Tier 2 (loaded_rows == stg_rows): Zero-loss ingestion verification
-
-[Layer 4: dbt Automated Data Tests (100 Tests)]
-  ├── Generic: unique, not_null, accepted_values, relationships
-  ├── Custom Macro: unique_combination for composite PK tables
-  ├── Business: assert_fact_orders_match_sales_amount (FULL OUTER JOIN audit)
-  └── Audit Schema: Violated records stored in `test_failures` for root-cause analysis
-```
-
----
-
-## 10. Project Structure
+## 3. Cấu trúc Thư mục Dự án (Project Directory Structure)
 
 ```text
 etl_ecommerce_data/
-├── .env                              # Environment connection credentials (TGT_DB_SCHEMA=bronze)
-├── .env.example                      # Documented template for environment setup
-├── .gitattributes                    # Enforces LF line endings for shell scripts
-├── .gitignore                        # Git exclusions (caches, logs, credentials)
-├── requirements.txt                  # Python dependencies
-├── run.sh                            # Unified CLI execution script
-├── main.py                           # Clean pipeline orchestrator (Bronze -> optional dbt)
+├── .env                              # Thông tin cấu hình môi trường & kết nối CSDL
+├── .env.example                      # Template mẫu cho cấu hình môi trường
+├── .gitattributes                    # Chuẩn hóa ký tự xuống dòng LF
+├── .gitignore                        # Danh sách loại trừ khỏi git (venv, logs, credentials)
+├── requirements.txt                  # Danh mục thư viện Python
+├── run.sh                            # Script CLI điều phối pipeline tổng hợp (Linux/macOS/Git Bash)
+├── main.py                           # File thực thi điều phối trung tâm (Bronze EL + dbt)
 │
 ├── logs/
-│   └── pipeline.log                  # Single consolidated log file (EL + dbt with 10MB rotation)
+│   └── pipeline.log                  # File log duy nhất của pipeline (ghi giờ chuẩn UTC, xoay vòng 10MB)
 │
 ├── Docker/
-│   ├── Dockerfile                    # Debian 12 + Python 3.11 + Microsoft ODBC Driver 18
-│   └── docker-compose.yml            # Multi-container orchestration (DWH + ETL App)
+│   ├── Dockerfile                    # Container Debian 12 + Python 3.11 + Microsoft ODBC Driver 18
+│   └── docker-compose.yml            # Điều phối multi-container (DWH PostgreSQL + ETL App)
 │
 ├── docs/
-│   ├── README.md                     # Technical project documentation
-│   └── oltp_olist.drawio             # Architectural Entity-Relationship Diagram (ERD)
+│   ├── README.md                     # Tài liệu kỹ thuật chi tiết của dự án
+│   ├── olap_olist.drawio             # Sơ đồ kiến trúc Star Schema (OLAP)
+│   └── oltp_olist.drawio             # Sơ đồ cơ sở dữ liệu giao dịch nguồn (OLTP)
 │
 ├── sql/
-│   ├── source/                       # SQL Server OLTP DDL & scripts
-│   │   ├── create_table.sql          # Source schema DDL with constraints
-│   │   ├── insert_data.sql           # Seed data insertion script
-│   │   └── validate_source.sql       # SQL Server pre-flight validation queries
-│   └── raw/                          # PostgreSQL Bronze DDL
-│       ├── raw_table.sql             # Bronze DDL with metadata columns & watermark indexes
-│       └── validate_staging.sql      # Bronze audit queries
+│   ├── source/                       # DDL và dữ liệu kiểm thử trên SQL Server
+│   │   ├── create_table.sql          # DDL bảng nguồn có ràng buộc
+│   │   ├── insert_data.sql           # Script nạp dữ liệu mẫu
+│   │   └── validate_source.sql       # Truy vấn kiểm tra sức khỏe nguồn
+│   └── raw/                          # DDL tầng Bronze trên PostgreSQL
+│       ├── raw_table.sql             # DDL bảng thô Bronze (Composite Index, Audit columns)
+│       └── validate_staging.sql      # Truy vấn kiểm tra tầng Bronze
 │
-├── src/                              # Modular Python Ingestion Engine (Bronze Layer)
+├── src/                              # Bộ máy trích xuất & nạp dữ liệu (Python Engine)
 │   ├── config/
-│   │   ├── config.py                 # Settings, DB engines, and connection strings
-│   │   └── extract_rules.yaml        # Table-level extraction rules & strategies
+│   │   ├── config.py                 # Nạp biến môi trường, cấu hình engine SQLAlchemy
+│   │   └── extract_rules.yaml        # Quy tắc trích xuất từng bảng (watermark, full, chunk_size)
 │   ├── schema/
-│   │   ├── __init__.py               # Unified schema management entrypoint
-│   │   ├── contract.py               # Pre-extract schema contract verification
-│   │   ├── evolution.py              # Dynamic target schema evolution
-│   │   └── swap.py                   # Blue-Green temporary schema & atomic swap (0.05s)
+│   │   ├── __init__.py               # Điểm xuất khẩu các module schema
+│   │   ├── contract.py               # Kiểm tra hợp đồng cấu trúc cột và khóa chính trước khi nạp
+│   │   ├── evolution.py              # Tự động đồng bộ hóa cột mới phát sinh vào Bronze
+│   │   └── init_schema.py            # Khởi tạo DDL bảng Bronze (Append-Only mode)
 │   ├── validate/
-│   │   ├── validate_source.py        # Connection checks & source baseline measurement
-│   │   ├── validate_target.py        # 2-Tier row count audit against baseline
-│   │   └── validate_pipeline.py      # Table load completeness enforcement
-│   ├── checkpoint.py                 # Watermark checkpoint persistence (_etl_watermarks)
-│   ├── database.py                   # Engine initialization & connection healthcheck
-│   ├── extract.py                    # Generator-based chunk streaming from SQL Server
-│   ├── load.py                       # High-speed COPY stream directly into Bronze
-│   ├── logger.py                     # RotatingFileHandler logging to logs/pipeline.log
-│   └── dbt_runner.py                 # Real-time dbt log interceptor and runner
+│   │   ├── validate_source.py        # Đo lường số dòng và schema baseline của nguồn
+│   │   ├── validate_target.py        # Kiểm toán số dòng Bronze đối chiếu với baseline nguồn
+│   │   └── validate_pipeline.py      # Đảm bảo toàn bộ bảng bắt buộc được nạp thành công
+│   ├── checkpoint.py                 # Quản lý mốc watermark (_etl_watermarks) & lịch sử chạy
+│   ├── checkpoint_manager.py         # Quản lý checkpoint atomic theo từng chunk trong transaction
+│   ├── database.py                   # Quản trị kết nối DB và hàm retry có exponential backoff
+│   ├── extract.py                    # Generator stream từng chunk từ SQL Server theo dải watermark
+│   ├── load.py                       # Nạp chunk vào Bronze và ghi checkpoint nguyên tử trong 1 transaction
+│   ├── logger.py                     # Cấu hình log chuẩn UTC (Console & Rotating File Handler)
+│   └── dbt_runner.py                 # Điều phối chạy dbt CLI và đồng bộ log dbt vào pipeline.log
 │
-└── dbt_transform/                    # dbt Dimensional Modeling Project (Silver & Gold)
-    ├── dbt_project.yml               # Configures +schema: silver and +schema: gold
-    ├── profiles.yml                  # PostgreSQL target profiles
+├── tests/                            # Bộ kiểm thử đơn vị Python (Unit Test Suite)
+│   └── test_unit_pipeline.py         # Test Schema Contract, Dynamic Query Builders, Checkpoint logic
+│
+└── dbt_transform/                    # Dự án dbt Core mô hình hóa dữ liệu (Silver & Gold)
+    ├── dbt_project.yml               # Cấu hình dự án dbt, chỉ định schema silver và gold
+    ├── profiles.yml                  # Cấu hình kết nối dbt tới PostgreSQL
     ├── macros/
-    │   ├── generate_schema_name.sql  # Custom macro ensuring clean schema naming (silver, gold)
-    │   └── unique_combination.sql    # Generic test for composite primary keys
+    │   ├── generate_schema_name.sql  # Macro tùy biến giữ nguyên tên schema riêng biệt (silver, gold)
+    │   └── unique_combination.sql    # Macro kiểm tra tính duy nhất của khóa tổ hợp
     ├── models/
-    │   ├── staging/                  # ── [SILVER LAYER: CLEANED & DEDUPED] ──────────
-    │   │   ├── sources.yml           # Declarations of bronze raw source tables
-    │   │   ├── schema.yml            # Data tests & column documentation for Silver
-    │   │   └── stg_*.sql             # 7 deduplicated & cleaned staging models
-    │   └── marts/                    # ── [GOLD LAYER: UNIFIED STAR SCHEMA] ──────────
-    │       ├── schema.yml            # Indexes, tests, and documentation for Gold
-    │       ├── dim_*.sql             # 5 Dimensions (dim_customer SCD2, dim_product...)
+    │   ├── staging/                  # ── [TẦNG SILVER: DEDUP & CLEANING] ──────────
+    │   │   ├── sources.yml           # Khai báo source Bronze, kiểm tra freshness, null & unique
+    │   │   ├── schema.yml            # Data tests & tài liệu các trường bảng Silver
+    │   │   └── stg_*.sql             # 7 model làm sạch và lọc bản ghi mới nhất qua ROW_NUMBER()
+    │   └── marts/                    # ── [TẦNG GOLD: UNIFIED STAR SCHEMA] ─────────
+    │       ├── schema.yml            # Cấu hình quan hệ khóa ngoại (FK), index và tests tầng Marts
+    │       ├── dim_*.sql             # 5 Dimensions (dim_customer SCD Type 2, dim_product, dim_date...)
     │       └── fact_*.sql            # 2 Fact tables (fact_orders, fact_sales)
-    └── tests/                        # Custom singular business logic assertions
+    └── tests/                        # Bộ kiểm thử quy tắc nghiệp vụ tầng Gold (Singular Tests)
         ├── assert_delivered_orders_have_delivery_date.sql
         ├── assert_fact_orders_match_sales_amount.sql
+        ├── assert_fact_orders_match_sales_items_count.sql
         ├── assert_order_dates_chronology.sql
         ├── assert_sales_amounts_positive.sql
         └── assert_valid_review_score.sql
@@ -411,245 +181,193 @@ etl_ecommerce_data/
 
 ---
 
-## 11. Installation and Configuration
+## 4. Hướng dẫn Triển khai (Deployment Guide)
 
-### Prerequisites
-- **Python**: Version 3.11 or higher
-- **PostgreSQL**: Version 15 or higher (default port 5432)
-- **SQL Server**: 2017+ or SQL Server Express (default port 1433)
-- **ODBC Driver**: Microsoft ODBC Driver 17 or 18 for SQL Server
-- **Docker**: (Optional) Docker Desktop 4.20+ with Docker Compose v2
+### 4.1. Yêu cầu Hệ thống (Prerequisites)
+* **Python**: Phiên bản 3.11 trở lên
+* **PostgreSQL**: Phiên bản 15 hoặc 16
+* **Microsoft SQL Server**: 2017, 2019, 2022 hoặc SQL Server Express
+* **ODBC Driver**: Microsoft ODBC Driver 18 for SQL Server (hoặc Driver 17)
+* **Docker & Docker Compose**: (Tùy chọn khi chạy containerized)
 
-### Step 1: Clone and Set Up Virtual Environment
-```bash
-git clone https://github.com/your-username/etl_ecommerce_data.git
-cd etl_ecommerce_data
+### 4.2. Cài đặt Môi trường (Environment Setup)
 
-# Create and activate virtual environment
-python -m venv .venv
+1. **Clone repository và di chuyển vào thư mục:**
+   ```bash
+   git clone https://github.com/your-username/etl_ecommerce_data.git
+   cd etl_ecommerce_data
+   ```
 
-# On Windows (PowerShell):
-.\.venv\Scripts\Activate.ps1
+2. **Khởi tạo và kích hoạt môi trường ảo Python:**
+   * Trên Windows (PowerShell):
+     ```powershell
+     python -m venv .venv
+     .\.venv\Scripts\Activate.ps1
+     ```
+   * Trên Linux / macOS:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
 
-# On Linux/macOS:
-source .venv/bin/activate
+3. **Cài đặt các thư viện phụ thuộc:**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
 
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+4. **Thiết lập biến môi trường:**
+   Tạo file `.env` từ file mẫu `.env.example`:
+   ```bash
+   cp .env.example .env
+   ```
+   Cấu hình thông số kết nối:
+   ```ini
+   # Cấu hình log
+   LOG_LEVEL_CONSOLE=INFO
+   LOG_LEVEL_FILE=DEBUG
 
-### Step 2: Configure Environment Variables
-Copy `.env.example` to `.env` and fill in your database credentials:
-```bash
-cp .env.example .env
-```
+   # Cấu hình nguồn SQL Server (OLTP)
+   SRC_DB_DRIVER=ODBC Driver 18 for SQL Server
+   SRC_DB_SERVER=localhost
+   SRC_DB_PORT=1433
+   SRC_DB_NAME=olist
+   SRC_DB_USER=sa
+   SRC_DB_PASSWORD=YourStrongPassword123!
+   SRC_DB_TRUSTED_CONNECTION=no
+   SRC_DB_TRUST_SERVER_CERTIFICATE=yes
 
-Configure parameters in `.env`:
-```ini
-# Logging Settings
-# Options: DEBUG, INFO, WARNING, ERROR
-LOG_LEVEL_CONSOLE=
-LOG_LEVEL_FILE=
+   # Cấu hình đích PostgreSQL Data Warehouse
+   TGT_DB_HOST=localhost
+   TGT_DB_PORT=5432
+   TGT_DB_NAME=olist_dwh
+   TGT_DB_USER=postgres
+   TGT_DB_PASSWORD=postgres
+   TGT_DB_SCHEMA=bronze
 
-# Source Database (SQL Server OLTP)
-# e.g., 'ODBC Driver 18 for SQL Server' or 'ODBC Driver 17 for SQL Server'
-SRC_DB_DRIVER=
-# e.g., localhost, 127.0.0.1, or localhost\SQLEXPRESS
-SRC_DB_SERVER=
-# e.g., 1433 (leave empty if using Named Instance like localhost\SQLEXPRESS)
-SRC_DB_PORT=
-# e.g., olist
-SRC_DB_NAME=
-# e.g., sa
-SRC_DB_USER=
-# e.g., YourStrongPassword123!
-SRC_DB_PASSWORD=
-# e.g., 'no' (SQL Server Auth) or 'yes' (Windows Auth)
-SRC_DB_TRUSTED_CONNECTION=
-# e.g., 'yes' (accept self-signed certs) or 'no'
-SRC_DB_TRUST_SERVER_CERTIFICATE=
+   # Cấu hình hiệu năng pipeline
+   ETL_MAX_WORKERS=4
+   CHUNK_SIZE=25000
+   ```
 
-# Target Data Warehouse (PostgreSQL)
-# e.g., localhost, 127.0.0.1, or postgres_dwh (when running in Docker)
-TGT_DB_HOST=
-# e.g., 5432
-TGT_DB_PORT=
-# e.g., olist_dwh
-TGT_DB_NAME=
-# e.g., postgres
-TGT_DB_USER=
-# e.g., postgres
-TGT_DB_PASSWORD=
-# e.g., bronze
-TGT_DB_SCHEMA=bronze
-```
+### 4.3. Cách Chạy Pipeline (Execution Options)
 
----
-
-## 12. How to Run
-
-### Option 1: Native Execution on Windows (PowerShell)
+#### Lựa chọn 1: Chạy trực tiếp trên Windows PowerShell
 
 ```powershell
-# 1. Run Bronze ingestion only:
+# 1. Chạy nạp dữ liệu tầng Bronze (Append-Only mode):
 .\.venv\Scripts\python.exe main.py
 
-# 2. Run entire Medallion pipeline end-to-end with unified logging:
+# 2. Chạy toàn bộ luồng End-to-End (Bronze -> Silver -> Gold -> Tests):
 .\.venv\Scripts\python.exe main.py --all
 
-# Or run individual dbt transformation stages with unified logging:
-.\.venv\Scripts\python.exe -m src.dbt_runner silver
-.\.venv\Scripts\python.exe -m src.dbt_runner gold
-.\.venv\Scripts\python.exe -m src.dbt_runner test
+# 3. Chạy ở chế độ tuần tự (Sequential mode - dành cho máy cấu hình thấp):
+.\.venv\Scripts\python.exe main.py --sequential
+
+# 4. Chạy riêng lẻ các tầng dbt với định dạng log chuẩn hóa:
+.\.venv\Scripts\python.exe -m src.dbt_runner silver    # Chỉ chạy tầng Silver
+.\.venv\Scripts\python.exe -m src.dbt_runner gold      # Chỉ chạy tầng Gold
+.\.venv\Scripts\python.exe -m src.dbt_runner test      # Chạy toàn bộ bài test dbt
 ```
 
-### Option 2: Unified CLI via `run.sh` (Git Bash / Linux / macOS)
+#### Lựa chọn 2: Sử dụng Unified CLI qua `run.sh` (Linux / macOS / Git Bash)
 
 ```bash
-# Execute entire pipeline end-to-end (Bronze -> Silver -> Gold -> Tests):
+chmod +x run.sh
+
+# Chạy trọn vẹn toàn bộ pipeline:
 ./run.sh pipeline
 
-# Or run individual stages:
-./run.sh extract-load        # Ingest from SQL Server into PostgreSQL Bronze
-./run.sh transform           # Run dbt Silver, Gold, and automated tests
-./run.sh transform-silver    # Build only Silver staging models
-./run.sh transform-gold      # Build only Gold Star Schema models
-./run.sh test                # Run 100+ automated data quality tests
-./run.sh clean               # Clean dbt compilation artifacts
+# Hoặc chạy từng công đoạn riêng biệt:
+./run.sh extract-load        # Nạp dữ liệu vào Bronze
+./run.sh transform           # Chạy dbt Silver, Gold và Tests
+./run.sh transform-silver    # Chỉ chạy dbt Silver
+./run.sh transform-gold      # Chỉ chạy dbt Gold
+./run.sh test                # Chạy kiểm thử chất lượng dữ liệu
+./run.sh clean               # Dọn dẹp cache biên dịch của dbt
 ```
 
-### Option 3: Full Multi-Container Stack with Docker Compose
+#### Lựa chọn 3: Triển khai toàn bộ cụm qua Docker Compose
 
-Automatically spins up a PostgreSQL Data Warehouse container and an ETL app container pre-installed with Microsoft ODBC Driver 18:
+Khởi chạy đồng thời cả cụm 3 container gồm Microsoft SQL Server 2022 (OLTP), PostgreSQL 16 (DWH) và ETL Engine container (đã cấu hình chạy dưới người dùng non-root an toàn):
 ```bash
-# Build and run containers
 docker compose --env-file .env -f Docker/docker-compose.yml up --build
-
-# Or via run.sh shortcut:
-./run.sh docker
 ```
 
 ---
 
-## 13. Results and Sample Queries
+## 5. Khung Kiểm thử Toàn diện (Testing & Quality Assurance)
 
-Once the pipeline completes, analytical consumers can immediately query high-value metrics from the `gold` schema.
+Dự án thiết lập hệ thống kiểm định chất lượng dữ liệu đa tầng theo đúng chuẩn Data Observability:
 
-### Query 1: Monthly Gross Merchandise Value (GMV) & Growth Rate
+### 5.1. Ma trận Kiểm thử 4 tầng (Multi-Tier Test Matrix)
+
+| Vị trí | Nội dung kiểm tra | Mục đích & Chi tiết triển khai | Nơi cấu hình trong dự án |
+| :--- | :--- | :--- | :--- |
+| **1. Source / Bronze** | `NULL`, `duplicate`, `schema`, `freshness` | **Kiểm tra dữ liệu đầu vào:**<br>• `freshness`: Cảnh báo nếu dữ liệu không có cập nhật mới sau 24h, báo lỗi sau 48h.<br>• `not_null`, `unique`: Giám sát tính toàn vẹn khóa thô.<br>• `contract.py`: Chặn nạp nếu nguồn bị thiếu cột khóa chính. | [dbt_transform/models/staging/sources.yml](file:///d:/code/personal_project/etl_ecommerce_data/dbt_transform/models/staging/sources.yml)<br>[src/schema/contract.py](file:///d:/code/personal_project/etl_ecommerce_data/src/schema/contract.py) |
+| **2. Silver Staging** | `not_null`, `unique`, `accepted_values` | **Kiểm tra dữ liệu sau làm sạch:**<br>• Đảm bảo khóa chính sau khử trùng lặp là duy nhất 100%.<br>• Trạng thái đơn hàng thuộc tập giá trị cho phép (`delivered`, `shipped`, `canceled`...). | [dbt_transform/models/staging/schema.yml](file:///d:/code/personal_project/etl_ecommerce_data/dbt_transform/models/staging/schema.yml) |
+| **3. Fact / Dimension** | `PK`, `FK`, `relationships` | **Kiểm tra tính toàn vẹn mô hình:**<br>• Ràng buộc khóa ngoại: 100% bản ghi Fact phải tham chiếu đúng Dimension tồn tại, không có đơn hàng mồ côi.<br>• Kiểm tra tính duy nhất của Surrogate Keys. | [dbt_transform/models/marts/schema.yml](file:///d:/code/personal_project/etl_ecommerce_data/dbt_transform/models/marts/schema.yml) |
+| **4. Gold** | `Tổng doanh thu`, `Số lượng`, `Quy tắc nghiệp vụ` | **Đảm bảo dữ liệu phân tích chính xác tuyệt đối:**<br>• Đối chiếu doanh thu: Tổng tiền trên `fact_orders` khớp với tổng các dòng hàng trên `fact_sales`.<br>• Đối chiếu số lượng: Số mặt hàng trên `fact_orders` khớp 100% số dòng hàng thực tế trên `fact_sales`.<br>• Kiểm tra logic ngày: Ngày giao hàng phải sau ngày đặt hàng. | [dbt_transform/tests/](file:///d:/code/personal_project/etl_ecommerce_data/dbt_transform/tests/) |
+
+### 5.2. Chạy Kiểm thử Đơn vị Python (Unit Test Suite)
+Kiểm tra tính hợp lệ của hợp đồng Schema, câu truy vấn trích xuất động và cấu hình Checkpoint:
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover tests
+# Ran 7 tests in 0.002s -> OK (100% Passed)
+```
+
+### 5.3. Chạy Kiểm thử Chất lượng Dữ liệu dbt
+Thực thi toàn bộ các bài test schema và quy tắc nghiệp vụ:
+```powershell
+.\.venv\Scripts\python.exe -m src.dbt_runner test
+# Hoặc qua run.sh:
+./run.sh test
+```
+*Lưu ý: Bất kỳ bản ghi nào vi phạm quy tắc kiểm thử sẽ được dbt tự động ghi nhận vào schema `test_failures` trên PostgreSQL để kỹ sư dữ liệu dễ dàng truy vết nguyên nhân gốc rễ (Root Cause Analysis).*
+
+---
+
+## 6. Truy vấn Mẫu Phân tích Dữ liệu tầng Gold (Sample Analytics Queries)
+
+### 6.1. Doanh thu theo tháng & Đánh giá mức độ hài lòng khách hàng
 ```sql
-select
+SELECT
     d.year,
     d.month,
     d.month_name,
-    count(distinct fo.order_key) as total_orders,
-    sum(fo.total_order_amount) as gross_revenue,
-    round(avg(fo.review_score), 2) as avg_satisfaction_score
-from gold.fact_orders fo
-inner join gold.dim_date d on fo.purchase_date_key = d.date_key
-where fo.order_status = 'delivered'
-group by d.year, d.month, d.month_name
-order by d.year, d.month;
+    COUNT(DISTINCT fo.order_key) AS total_orders,
+    SUM(fo.total_order_amount) AS gross_revenue,
+    ROUND(AVG(fo.review_score), 2) AS avg_satisfaction_score
+FROM gold.fact_orders fo
+INNER JOIN gold.dim_date d ON fo.purchase_date_key = d.date_key
+WHERE fo.order_status = 'delivered'
+GROUP BY d.year, d.month, d.month_name
+ORDER BY d.year, d.month;
 ```
 
-### Query 2: Logistics Timeliness & Delivery Status by State
+### 6.2. Phân tích lịch sử thay đổi địa điểm khách hàng (SCD Type 2)
 ```sql
-select
-    dl.state_code,
-    count(fo.order_key) as total_shipments,
-    count(case when fo.delivery_status = 'On Time' then 1 end) as on_time_shipments,
-    count(case when fo.delivery_status = 'Late' then 1 end) as late_shipments,
-    round(100.0 * count(case when fo.delivery_status = 'On Time' then 1 end) / count(*), 2) as on_time_rate_pct,
-    round(avg(fo.total_freight_amount), 2) as avg_freight_cost
-from gold.fact_orders fo
-inner join gold.dim_location dl on fo.shipping_location_key = dl.location_key
-where fo.order_status = 'delivered'
-group by dl.state_code
-order by total_shipments desc;
-```
-
-### Query 3: Top 10 Best-Selling Product Categories by Revenue
-```sql
-select
-    coalesce(dp.product_category_name, 'Uncategorized') as category,
-    count(fs.sales_key) as items_sold,
-    sum(fs.item_price) as category_revenue,
-    round(avg(fs.item_price), 2) as avg_item_price
-from gold.fact_sales fs
-inner join gold.dim_product dp on fs.product_key = dp.product_key
-group by dp.product_category_name
-order by category_revenue desc
-limit 10;
-```
-
-### Query 4: Customer Relocation Analysis (SCD Type 2)
-```sql
--- Find customers who relocated to a different city and made orders from both locations
-with customer_versions as (
-    select
-        customer_unique_id,
-        count(distinct location_key) as distinct_locations,
-        count(*) as total_versions
-    from gold.dim_customer
-    group by customer_unique_id
-    having count(distinct location_key) > 1
-)
-select
+SELECT
     dc.customer_unique_id,
     dl.city_name,
     dl.state_code,
     dc.valid_from,
     dc.valid_to,
     dc.is_current
-from gold.dim_customer dc
-inner join customer_versions cv on dc.customer_unique_id = cv.customer_unique_id
-inner join gold.dim_location dl on dc.location_key = dl.location_key
-order by dc.customer_unique_id, dc.valid_from;
-```
-
-### Query 5: Revenue Audit Discrepancy Probe
-```sql
--- Query failure records if assert_fact_orders_match_sales_amount flags discrepancies
-select *
-from test_failures.assert_fact_orders_match_sales_amount
-limit 50;
+FROM gold.dim_customer dc
+INNER JOIN gold.dim_location dl ON dc.location_key = dl.location_key
+WHERE dc.customer_unique_id IN (
+    SELECT customer_unique_id
+    FROM gold.dim_customer
+    GROUP BY customer_unique_id
+    HAVING COUNT(*) > 1
+)
+ORDER BY dc.customer_unique_id, dc.valid_from;
 ```
 
 ---
 
-## 14. Design Decisions
-
-| Challenge / Scenario | Chosen Design Pattern | Trade-Off & Technical Rationale |
-|---|---|---|
-| **Pipeline Architecture** | **Medallion Architecture** (Bronze -> Silver -> Gold) | Separation of concerns: Bronze stores 100% faithful raw data with audit metadata, Silver handles SQL cleaning and deduplication, Gold serves analytics. |
-| **Data Ingestion** | **Chunked Generator Streaming** (25,000 rows/batch) | Memory footprint never exceeds ~250MB even when processing millions of rows, enabling smooth execution on resource-constrained 4GB machines. |
-| **Bronze Raw Fidelity** | **Zero-Drop Raw Landing** | No dropping rows or deduplicating on RAM in Python. Guarantees 100% auditability and enables complete pipeline replays from Bronze without querying production OLTP. |
-| **Staging Downtime** | **Blue-Green Schema Swapping** (`bronze_staging_tmp` -> `bronze`) | Truncating staging tables leaves tables empty during ingestion. Atomic catalog renaming (`ALTER SCHEMA`) reduces downtime to just 0.05 seconds. |
-| **Deduplication Strategy** | **SQL Window Function in Silver** | Uses `ROW_NUMBER() OVER (PARTITION BY pk ORDER BY _extracted_at DESC, _batch_id DESC) = 1` inside dbt to guarantee 100% idempotent deduplication. |
-| **Customer Dimension** | **SCD Type 2 Modeling** | Avoids overwriting historical customer addresses, ensuring past geographic revenue distributions remain historically accurate. |
-| **Schema Management** | **Custom Macro `generate_schema_name`** | Overrides dbt's default behavior of prefixing target schema, producing clean, isolated schemas (`silver`, `gold`, `test_failures`). |
-| **Unified Logging** | **Single `pipeline.log` + Interceptor** | Intercepts dbt real-time stream into Python's structured logger, outputting everything into a single 10MB rotating file (`logs/pipeline.log`). |
-
----
-
-## 15. Limitations and Future Improvements
-
-### Current Limitations
-- **Single-Threaded Extraction**: Tables are currently extracted sequentially; tables with heavy data volumes can benefit from concurrent extraction threads.
-- **Local File Logs**: System logs and dbt logs are persisted to local disk files (`logs/`) rather than an aggregated log forwarder.
-- **Batch Cadence**: Pipeline is tuned for scheduled micro-batch/hourly execution rather than sub-second real-time streaming.
-
-### Future Roadmap
-- [ ] **Orchestration Migration to Apache Airflow**: Convert the execution workflow into a production Airflow DAG with retry policies and Slack alerts.
-- [ ] **Change Data Capture (CDC)**: Implement Debezium + Apache Kafka over SQL Server CDC transaction logs for sub-second streaming ingestion.
-- [ ] **Automated Data Quality Framework**: Integrate Soda Core or Great Expectations for declarative SLA data monitoring and anomaly detection.
-- [ ] **Cloud Lakehouse Target**: Extend loaders to support modern Lakehouse table formats (Apache Iceberg / Delta Lake) on Google Cloud BigQuery or Snowflake.
-- [ ] **CI/CD Integration**: Implement GitHub Actions pipelines to run automated unit tests and dbt Slim CI on pull requests.
-
----
-
-## 👨‍💻 Author & Acknowledgments
-- **Project**: Olist E-Commerce Data Engineering Pipeline
-- **Dataset**: Brazilian E-Commerce Public Dataset by [Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
-- **License**: MIT License - Free for educational and commercial analytics development.
-
+## 7. Giấy phép & Tác giả (License & Author)
+* **Dự án**: Olist E-Commerce Medallion Data Engineering Pipeline
+* **Bộ dữ liệu**: Brazilian E-Commerce Public Dataset by [Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+* **Giấy phép**: MIT License.

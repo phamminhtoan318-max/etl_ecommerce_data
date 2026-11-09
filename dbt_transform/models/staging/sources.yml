@@ -4,18 +4,106 @@ sources:
   - name: bronze
     schema: "{{ env_var('TGT_DB_SCHEMA', 'bronze') }}"
     description: "Tầng dữ liệu thô (Bronze Layer) được Python trích xuất nguyên bản 100% từ SQL Server"
+    freshness:
+      warn_after: {count: 24, period: hour}
+      error_after: {count: 48, period: hour}
+    loaded_at_field: _extracted_at
     tables:
       - name: olist_customers_dataset
         description: "Bảng dữ liệu khách hàng thô"
+        columns:
+          - name: customer_id
+            tests:
+              - not_null:
+                  config:
+                    severity: warn
+              - unique:
+                  config:
+                    severity: warn
+          - name: _extracted_at
+            tests:
+              - not_null
+
       - name: olist_products_dataset
         description: "Bảng dữ liệu danh mục sản phẩm thô"
+        columns:
+          - name: product_id
+            tests:
+              - not_null:
+                  config:
+                    severity: warn
+              - unique:
+                  config:
+                    severity: warn
+          - name: _extracted_at
+            tests:
+              - not_null
+
       - name: olist_sellers_dataset
         description: "Bảng dữ liệu đối tác người bán thô"
+        columns:
+          - name: seller_id
+            tests:
+              - not_null:
+                  config:
+                    severity: warn
+              - unique:
+                  config:
+                    severity: warn
+          - name: _extracted_at
+            tests:
+              - not_null
+
       - name: olist_orders_dataset
         description: "Bảng dữ liệu đơn hàng thô"
+        columns:
+          - name: order_id
+            tests:
+              - not_null:
+                  config:
+                    severity: warn
+              - unique:
+                  config:
+                    severity: warn
+          - name: _extracted_at
+            tests:
+              - not_null
+
       - name: olist_order_items_dataset
         description: "Bảng dữ liệu chi tiết mặt hàng trong đơn thô"
+        columns:
+          - name: order_id
+            tests:
+              - not_null
+          - name: order_item_id
+            tests:
+              - not_null
+          - name: _extracted_at
+            tests:
+              - not_null
+
       - name: olist_order_payments_dataset
         description: "Bảng dữ liệu thanh toán đơn hàng thô"
+        columns:
+          - name: order_id
+            tests:
+              - not_null
+          - name: payment_sequential
+            tests:
+              - not_null
+          - name: _extracted_at
+            tests:
+              - not_null
+
       - name: olist_order_reviews_dataset
         description: "Bảng dữ liệu đánh giá đơn hàng thô"
+        columns:
+          - name: review_id
+            tests:
+              - not_null
+          - name: order_id
+            tests:
+              - not_null
+          - name: _extracted_at
+            tests:
+              - not_null
