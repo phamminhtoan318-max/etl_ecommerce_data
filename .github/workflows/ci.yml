@@ -73,6 +73,7 @@ jobs:
       - name: Validate dbt Models, Macros & Lineage
         run: |
           cd dbt_transform
+          dbt deps
           dbt parse
 
   docker-build:

@@ -124,34 +124,36 @@ etl_ecommerce_data/
 │   └── oltp_olist.drawio             # Sơ đồ cơ sở dữ liệu giao dịch nguồn (OLTP)
 │
 ├── sql/
-│   ├── source/                       # DDL và dữ liệu kiểm thử trên SQL Server
-│   │   ├── create_table.sql          # DDL bảng nguồn có ràng buộc
-│   │   ├── insert_data.sql           # Script nạp dữ liệu mẫu
-│   │   └── validate_source.sql       # Truy vấn kiểm tra sức khỏe nguồn
-│   └── raw/                          # DDL tầng Bronze trên PostgreSQL
+│   ├── source/                       # Truy vấn kiểm tra sức khỏe nguồn SQL Server
+│   │   └── validate_source.sql       # Baseline row count & integrity check
+│   └── raw/                          # DDL & truy vấn kiểm định tầng Bronze
 │       ├── raw_table.sql             # DDL bảng thô Bronze (Composite Index, Audit columns)
-│       └── validate_staging.sql      # Truy vấn kiểm tra tầng Bronze
+│       └── validate_bronze.sql       # Truy vấn kiểm tra đối soát tầng Bronze
 │
 ├── src/                              # Bộ máy trích xuất & nạp dữ liệu (Python Engine)
-│   ├── config/
-│   │   ├── config.py                 # Nạp biến môi trường, cấu hình engine SQLAlchemy
+│   ├── config/                       # Quản lý cấu hình & quy tắc trích xuất
+│   │   ├── settings.py               # Nạp biến môi trường, cấu hình engine SQLAlchemy
 │   │   └── extract_rules.yaml        # Quy tắc trích xuất từng bảng (watermark, full, chunk_size)
-│   ├── schema/
-│   │   ├── __init__.py               # Điểm xuất khẩu các module schema
+│   ├── core/                         # Tiện ích nền tảng dùng chung (Single Responsibility)
+│   │   ├── connection.py             # Quản trị kết nối DB và hàm retry có exponential backoff
+│   │   ├── logger.py                 # Cấu hình log chuẩn UTC (Console & Rotating File Handler)
+│   │   └── alert.py                  # Dịch vụ thông báo cảnh báo qua Webhook (Discord / Slack)
+│   ├── ingestion/                    # Bộ máy hút & nạp dữ liệu thô (E & L)
+│   │   ├── extract.py                # Generator stream từng chunk từ SQL Server theo dải watermark
+│   │   └── load.py                   # Nạp chunk vào Bronze và ghi checkpoint nguyên tử trong 1 transaction
+│   ├── state/                        # Hệ thống quản lý trạng thái & Checkpoint (State Management)
+│   │   ├── watermark.py              # Quản lý mốc watermark (_etl_watermarks) cho incremental load
+│   │   ├── state_manager.py          # Quản lý trạng thái Chunk, Batch & Crash recovery (_pipeline_checkpoints)
+│   │   └── history.py                # Quản lý lưu vết lịch sử vận hành (_etl_run_history)
+│   ├── schema/                       # Quản trị hợp đồng DDL & cấu trúc bảng
 │   │   ├── contract.py               # Kiểm tra hợp đồng cấu trúc cột và khóa chính trước khi nạp
 │   │   ├── evolution.py              # Tự động đồng bộ hóa cột mới phát sinh vào Bronze
 │   │   └── init_schema.py            # Khởi tạo DDL bảng Bronze (Append-Only mode)
-│   ├── validate/
+│   ├── validate/                     # Kiểm toán & đối soát dữ liệu (Quality Gate)
 │   │   ├── validate_source.py        # Đo lường số dòng và schema baseline của nguồn
-│   │   ├── validate_target.py        # Kiểm toán số dòng Bronze đối chiếu với baseline nguồn
-│   │   └── validate_pipeline.py      # Đảm bảo toàn bộ bảng bắt buộc được nạp thành công
-│   ├── checkpoint.py                 # Quản lý mốc watermark (_etl_watermarks) & lịch sử chạy
-│   ├── checkpoint_manager.py         # Quản lý checkpoint atomic theo từng chunk trong transaction
-│   ├── database.py                   # Quản trị kết nối DB và hàm retry có exponential backoff
-│   ├── extract.py                    # Generator stream từng chunk từ SQL Server theo dải watermark
-│   ├── load.py                       # Nạp chunk vào Bronze và ghi checkpoint nguyên tử trong 1 transaction
-│   ├── logger.py                     # Cấu hình log chuẩn UTC (Console & Rotating File Handler)
-│   └── dbt_runner.py                 # Điều phối chạy dbt CLI và đồng bộ log dbt vào pipeline.log
+│   │   └── validate_target.py        # Kiểm toán số dòng Bronze đối chiếu với baseline nguồn
+│   └── transformation/               # Điều phối chuyển đổi dbt (T)
+│       └── dbt_runner.py             # Điều phối chạy dbt CLI và đồng bộ log dbt vào pipeline.log
 │
 ├── tests/                            # Bộ kiểm thử đơn vị Python (Unit Test Suite)
 │   └── test_unit_pipeline.py         # Test Schema Contract, Dynamic Query Builders, Checkpoint logic
