@@ -1,11 +1,11 @@
 from sqlalchemy import inspect, text
-from src.config.config import (
+from src.config.settings import (
     EXTRACT_PIPELINE_RULES,
     VALIDATE_SQL_PATH_SOURCE,
 )
-from src.database import get_source_engine
-from src.extract import OLIST_7_TABLES, build_dynamic_query, resolve_table_name
-from src.logger import get_logger
+from src.core.connection import get_source_engine
+from src.core.logger import get_logger
+from src.ingestion.extract import OLIST_7_TABLES, build_dynamic_query, resolve_table_name
 from src.schema import resolve_and_validate_columns
 
 logger = get_logger(__name__)

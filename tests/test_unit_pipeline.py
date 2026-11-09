@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-from src.extract import build_dynamic_query, resolve_table_name
+from src.ingestion.extract import build_dynamic_query, resolve_table_name
 from src.schema.contract import (
     SchemaValidationError,
     parse_columns_config,
@@ -90,9 +90,10 @@ class TestSchemaContractAndEvolution(unittest.TestCase):
         self.assertIn("[order_purchase_timestamp] >= '2017-01-01' AND [order_purchase_timestamp] < '2018-01-01'", q_dr)
 
     def test_checkpoint_schema_and_table_definitions(self):
-        from src.checkpoint_manager import CHECKPOINT_SCHEMA, CHECKPOINT_TABLE
+        from src.state import CHECKPOINT_SCHEMA, CHECKPOINT_TABLE, CHUNK_LOG_TABLE
         self.assertEqual(CHECKPOINT_SCHEMA, "etl_metadata")
         self.assertEqual(CHECKPOINT_TABLE, "_pipeline_checkpoints")
+        self.assertEqual(CHUNK_LOG_TABLE, "_pipeline_chunk_checkpoints")
 
 
 if __name__ == "__main__":

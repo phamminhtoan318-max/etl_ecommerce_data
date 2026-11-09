@@ -1,10 +1,11 @@
 from sqlalchemy import inspect, text
-from src.config.config import (
+from src.config.settings import (
     TGT_DB_SCHEMA,
+    VALIDATE_SQL_PATH_BRONZE,
     VALIDATE_SQL_PATH_STAGING,
 )
-from src.database import get_target_engine
-from src.logger import get_logger
+from src.core.connection import get_target_engine
+from src.core.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -4,8 +4,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from src.config.config import BASE_DIR
-from src.logger import get_logger
+from src.config.settings import BASE_DIR
+from src.core.logger import get_logger
 
 logger = get_logger("dbt_runner")
 

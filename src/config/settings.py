@@ -9,7 +9,8 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 
 LOGS_DIR = BASE_DIR / "logs"
 VALIDATE_SQL_PATH_SOURCE = BASE_DIR / "sql" / "source" / "validate_source.sql"
-VALIDATE_SQL_PATH_STAGING = BASE_DIR / "sql" / "raw" / "validate_staging.sql"
+VALIDATE_SQL_PATH_BRONZE = BASE_DIR / "sql" / "raw" / "validate_bronze.sql"
+VALIDATE_SQL_PATH_STAGING = VALIDATE_SQL_PATH_BRONZE
 STAGING_DDL_SQL_PATH = BASE_DIR / "sql" / "raw" / "raw_table.sql"
 
 for directory in [BASE_DIR, LOGS_DIR]:
@@ -62,6 +63,9 @@ TGT_DB_NAME = os.getenv("TGT_DB_NAME")
 TGT_DB_USER = os.getenv("TGT_DB_USER")
 TGT_DB_PASSWORD = os.getenv("TGT_DB_PASSWORD")
 TGT_DB_SCHEMA = os.getenv("TGT_DB_SCHEMA", "bronze")
+CHECKPOINT_SCHEMA = os.getenv("CHECKPOINT_SCHEMA", "etl_metadata")
+CHECKPOINT_TABLE = os.getenv("CHECKPOINT_TABLE", "_pipeline_checkpoints")
+CHUNK_LOG_TABLE = os.getenv("CHUNK_LOG_TABLE", "_pipeline_chunk_checkpoints")
 
 TGT_SQLALCHEMY_URI = (
     f"postgresql+psycopg2://{TGT_DB_USER}:{quote_plus(TGT_DB_PASSWORD or '')}@{TGT_DB_HOST}:{TGT_DB_PORT}/{TGT_DB_NAME}"

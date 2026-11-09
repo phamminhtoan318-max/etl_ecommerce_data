@@ -2,22 +2,25 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import time
 from datetime import datetime, timezone
-from src.checkpoint import get_watermark_states, save_pipeline_run_history, send_alert_webhook
-from src.checkpoint_manager import (
-    get_active_checkpoints,
-    init_checkpoint_manager,
-    mark_all_checkpoints_completed,
-)
-from src.config.config import ETL_MAX_WORKERS, EXTRACT_PIPELINE_RULES, TGT_DB_SCHEMA
-from src.database import get_source_engine, get_target_engine, test_connections
-from src.extract import build_dynamic_query, extract_from_sqlserver, extract_table
-from src.load import load_single_table
-from src.logger import get_logger
+from src.config.settings import ETL_MAX_WORKERS, EXTRACT_PIPELINE_RULES, TGT_DB_SCHEMA
+from src.core.alert import send_alert_webhook
+from src.core.connection import get_source_engine, get_target_engine, test_connections
+from src.core.logger import get_logger
+from src.ingestion.extract import build_dynamic_query, extract_from_sqlserver, extract_table
+from src.ingestion.load import load_single_table
 from src.schema import (
     SchemaValidationError,
     init_bronze_schema,
 )
-from src.validate.validate_pipeline import measure_source_baseline, validate_staging_against_baseline
+from src.state.history import save_pipeline_run_history
+from src.state.state_manager import (
+    get_active_checkpoints,
+    init_checkpoint_manager,
+    mark_all_checkpoints_completed,
+)
+from src.state.watermark import get_watermark_states
+from src.transformation.dbt_runner import run_dbt_all
+from src.validate import measure_source_baseline, validate_staging_against_baseline
 
 logger = get_logger(__name__)
 
@@ -178,7 +181,6 @@ def main():
         logger.info("🎉 NẠP TẦNG BRONZE THÀNH CÔNG 100%!")
 
         if "--transform" in sys.argv or "--all" in sys.argv:
-            from src.dbt_runner import run_dbt_all
             run_dbt_all()
 
     except SchemaValidationError as sve:

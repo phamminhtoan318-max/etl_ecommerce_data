@@ -2,8 +2,8 @@ from functools import lru_cache, wraps
 import time
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError, OperationalError
-from src.config.config import SRC_SQLALCHEMY_URI, TGT_SQLALCHEMY_URI
-from src.logger import get_logger
+from src.config.settings import SRC_SQLALCHEMY_URI, TGT_SQLALCHEMY_URI
+from src.core.logger import get_logger
 
 logger = get_logger(__name__)
 

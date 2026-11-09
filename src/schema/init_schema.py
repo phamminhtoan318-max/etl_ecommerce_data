@@ -1,6 +1,6 @@
 from sqlalchemy import text
-from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
-from src.logger import get_logger
+from src.config.settings import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
+from src.core.logger import get_logger
 
 logger = get_logger(__name__)
 

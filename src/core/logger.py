@@ -2,7 +2,7 @@ import logging
 import sys
 import time
 from logging.handlers import RotatingFileHandler
-from src.config.config import LOGS_DIR, LOG_LEVEL_CONSOLE, LOG_LEVEL_FILE
+from src.config.settings import LOGS_DIR, LOG_LEVEL_CONSOLE, LOG_LEVEL_FILE
 
 
 def setup_logging(log_filename="pipeline.log"):
