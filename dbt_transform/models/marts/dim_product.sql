@@ -12,3 +12,12 @@ select
         6
     ) as volume_m3
 from products
+
+union all
+
+select
+    '00000000-0000-0000-0000-000000000000'::uuid as product_key,
+    'unknown' as product_id,
+    'unknown' as product_category_name,
+    0.0000 as weight_kg,
+    0.000000 as volume_m3

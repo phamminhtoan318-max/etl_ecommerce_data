@@ -129,6 +129,7 @@ models:
       - name: approved_date_key
         description: "Khóa ngoại ngày duyệt đơn trỏ sang dim_date"
         tests:
+          - not_null
           - relationships:
               arguments:
                 to: ref('dim_date')
@@ -136,6 +137,7 @@ models:
       - name: delivered_date_key
         description: "Khóa ngoại ngày giao hàng trỏ sang dim_date"
         tests:
+          - not_null
           - relationships:
               arguments:
                 to: ref('dim_date')

@@ -3,9 +3,9 @@ with customer_orders_raw as (
         c.customer_unique_id,
         c.customer_city,
         c.customer_state,
-        coalesce(o.purchased_at, '2016-01-01'::timestamp) as purchased_at,
+        coalesce(o.purchased_at, '1900-01-01 00:00:00'::timestamp) as purchased_at,
         row_number() over (
-            partition by c.customer_unique_id, coalesce(o.purchased_at, '2016-01-01'::timestamp)
+            partition by c.customer_unique_id, coalesce(o.purchased_at, '1900-01-01 00:00:00'::timestamp)
             order by c.customer_id
         ) as rn
     from {{ ref('stg_customers') }} c
@@ -65,9 +65,19 @@ select
     customer_unique_id,
     coalesce(location_key, '00000000-0000-0000-0000-000000000000'::uuid) as location_key,
     valid_from,
-    coalesce(next_valid_from, '9999-12-31'::timestamp) as valid_to,
+    coalesce(next_valid_from, '9999-12-31 23:59:59'::timestamp) as valid_to,
     case
         when next_valid_from is null then true
         else false
     end as is_current
 from scd_calculated
+
+union all
+
+select
+    '00000000-0000-0000-0000-000000000000'::uuid as customer_key,
+    'unknown' as customer_unique_id,
+    '00000000-0000-0000-0000-000000000000'::uuid as location_key,
+    '1900-01-01 00:00:00'::timestamp as valid_from,
+    '9999-12-31 23:59:59'::timestamp as valid_to,
+    true as is_current

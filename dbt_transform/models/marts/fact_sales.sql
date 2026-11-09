@@ -14,11 +14,14 @@ select
     md5(concat(oi.order_id, '-', oi.order_item_id))::uuid as sales_key,
     oi.order_id,
     oi.order_item_id,
-    dc.customer_key,
-    dp.product_key,
-    ds.seller_key,
+    coalesce(dc.customer_key, '00000000-0000-0000-0000-000000000000'::uuid) as customer_key,
+    coalesce(dp.product_key, '00000000-0000-0000-0000-000000000000'::uuid) as product_key,
+    coalesce(ds.seller_key, '00000000-0000-0000-0000-000000000000'::uuid) as seller_key,
     coalesce(dl.location_key, '00000000-0000-0000-0000-000000000000'::uuid) as shipping_location_key,
-    to_char(o.purchased_at, 'YYYYMMDD')::integer as purchase_date_key,
+    case
+        when o.purchased_at is not null then to_char(o.purchased_at, 'YYYYMMDD')::integer
+        else -1
+    end as purchase_date_key,
     oi.item_price,
     oi.freight_value,
     (oi.item_price + oi.freight_value)::decimal(10, 2) as total_item_amount
@@ -32,8 +35,10 @@ left join {{ ref('dim_location') }} dl
     and cs.customer_state = dl.state_code
 left join {{ ref('dim_customer') }} dc
     on cs.customer_unique_id = dc.customer_unique_id
-    and coalesce(o.purchased_at, '2016-01-01'::timestamp) >= dc.valid_from
-    and coalesce(o.purchased_at, '2016-01-01'::timestamp) < dc.valid_to
+    and (
+        (o.purchased_at is not null and o.purchased_at >= dc.valid_from and o.purchased_at < dc.valid_to)
+        or (o.purchased_at is null and dc.is_current = true)
+    )
 left join {{ ref('dim_product') }} dp
     on oi.product_id = dp.product_id
 left join {{ ref('dim_seller') }} ds

@@ -9,4 +9,4 @@ select
     delivered_date_key
 from {{ ref('fact_orders') }}
 where order_status = 'delivered'
-  and delivered_date_key is null
+  and (delivered_date_key is null or delivered_date_key < 0)

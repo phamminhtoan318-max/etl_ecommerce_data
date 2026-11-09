@@ -14,3 +14,10 @@ from sellers s
 left join locations l
     on s.seller_city = l.city_name
     and s.seller_state = l.state_code
+
+union all
+
+select
+    '00000000-0000-0000-0000-000000000000'::uuid as seller_key,
+    'unknown' as seller_id,
+    '00000000-0000-0000-0000-000000000000'::uuid as location_key

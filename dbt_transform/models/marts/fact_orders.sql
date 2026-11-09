@@ -37,11 +37,23 @@ reviews_agg as (
 select
     md5(o.order_id)::uuid as order_key,
     o.order_id,
-    dc.customer_key,
+    coalesce(dc.customer_key, '00000000-0000-0000-0000-000000000000'::uuid) as customer_key,
     coalesce(dl.location_key, '00000000-0000-0000-0000-000000000000'::uuid) as shipping_location_key,
-    to_char(o.purchased_at, 'YYYYMMDD')::integer as purchase_date_key,
-    to_char(o.approved_at, 'YYYYMMDD')::integer as approved_date_key,
-    to_char(o.delivered_to_customer_at, 'YYYYMMDD')::integer as delivered_date_key,
+    case
+        when o.purchased_at is not null then to_char(o.purchased_at, 'YYYYMMDD')::integer
+        else -1
+    end as purchase_date_key,
+    case
+        when o.approved_at is not null then to_char(o.approved_at, 'YYYYMMDD')::integer
+        when o.order_status in ('canceled', 'unavailable') then -2
+        else -3
+    end as approved_date_key,
+    case
+        when o.delivered_to_customer_at is not null then to_char(o.delivered_to_customer_at, 'YYYYMMDD')::integer
+        when o.order_status = 'delivered' and o.delivered_to_customer_at is null then -1
+        when o.order_status in ('canceled', 'unavailable') then -2
+        else -3
+    end as delivered_date_key,
     o.order_status,
     coalesce(p.payment_type, 'unknown') as payment_type,
     case
@@ -63,8 +75,10 @@ left join {{ ref('dim_location') }} dl
     and cs.customer_state = dl.state_code
 left join {{ ref('dim_customer') }} dc
     on cs.customer_unique_id = dc.customer_unique_id
-    and coalesce(o.purchased_at, '2016-01-01'::timestamp) >= dc.valid_from
-    and coalesce(o.purchased_at, '2016-01-01'::timestamp) < dc.valid_to
+    and (
+        (o.purchased_at is not null and o.purchased_at >= dc.valid_from and o.purchased_at < dc.valid_to)
+        or (o.purchased_at is null and dc.is_current = true)
+    )
 left join items_agg i
     on o.order_id = i.order_id
 left join payments_agg p
