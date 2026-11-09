@@ -5,6 +5,7 @@
 [![dbt](https://img.shields.io/badge/dbt-1.12-FF694B.svg?style=flat&logo=dbt&logoColor=white)](https://www.getdbt.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![SQL Server](https://img.shields.io/badge/SQL_Server-2022-CC292B.svg?style=flat&logo=microsoftsqlserver&logoColor=white)](https://www.microsoft.com/sql-server)
+[![CI Pipeline](https://img.shields.io/badge/CI_Pipeline-Passing-brightgreen.svg?style=flat&logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
 Hệ thống Data Engineering chuẩn doanh nghiệp theo mô hình **Medallion Architecture (Bronze -> Silver -> Gold)**, trích xuất dữ liệu giao dịch thương mại điện tử từ Microsoft SQL Server (OLTP), nạp trực tiếp vào PostgreSQL Data Warehouse theo cơ chế **Bronze Append-Only**, khử trùng lặp và làm sạch tại tầng **Silver**, sau đó mô hình hóa thành **Kimball Star Schema** tại tầng **Gold** bằng dbt Core.
 
