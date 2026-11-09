@@ -3,10 +3,10 @@ import io
 import time
 import pandas as pd
 from sqlalchemy import text
-from src.checkpoint import get_watermark_states, upsert_watermark_state
-from src.checkpoint_manager import record_chunk_checkpoint_in_tx
-from src.config.config import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
-from src.logger import get_logger
+from src.state.watermark import get_watermark_states, upsert_watermark_state
+from src.state.state_manager import record_chunk_checkpoint_in_tx
+from src.config.settings import STAGING_DDL_SQL_PATH, TGT_DB_SCHEMA
+from src.core.logger import get_logger
 from src.schema import sync_target_schema_evolution
 
 logger = get_logger(__name__)
@@ -163,6 +163,7 @@ def stream_load_table_to_postgres(
                             chunk_max_wm=chunk_max_wm,
                             batch_id=chunk_batch_id or "BATCH_UNKNOWN",
                             chunk_rows=chunk_rows,
+                            chunk_index=batch_idx,
                         )
 
                 total_rows += chunk_rows

@@ -1,11 +1,13 @@
 from sqlalchemy import text
-from src.config.config import EXTRACT_PIPELINE_RULES
-from src.logger import get_logger
+from src.config.settings import (
+    CHECKPOINT_SCHEMA,
+    CHECKPOINT_TABLE,
+    CHUNK_LOG_TABLE,
+    EXTRACT_PIPELINE_RULES,
+)
+from src.core.logger import get_logger
 
 logger = get_logger(__name__)
-
-CHECKPOINT_SCHEMA = "etl_metadata"
-CHECKPOINT_TABLE = "_pipeline_checkpoints"
 
 
 def init_checkpoint_manager(tgt_engine):
@@ -22,6 +24,17 @@ def init_checkpoint_manager(tgt_engine):
             committed_rows   BIGINT DEFAULT 0,
             status           VARCHAR(20) DEFAULT 'IN_PROGRESS',
             updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS "{CHECKPOINT_SCHEMA}"."{CHUNK_LOG_TABLE}" (
+            batch_id         VARCHAR(64) NOT NULL,
+            logical_name     VARCHAR(50) NOT NULL,
+            chunk_index      INTEGER NOT NULL,
+            chunk_rows       BIGINT NOT NULL,
+            chunk_max_wm     VARCHAR(50),
+            status           VARCHAR(20) DEFAULT 'COMPLETED',
+            committed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (batch_id, logical_name, chunk_index)
         );
         """
     )
@@ -67,6 +80,7 @@ def record_chunk_checkpoint_in_tx(
     chunk_max_wm,
     batch_id,
     chunk_rows,
+    chunk_index=1,
 ):
     checkpoint_val = str(chunk_max_wm)[:19] if chunk_max_wm is not None else "CHUNK_COMMITTED"
     upsert_sql = text(
@@ -96,6 +110,30 @@ def record_chunk_checkpoint_in_tx(
             "last_checkpoint": checkpoint_val,
             "last_batch_id": batch_id,
             "committed_rows": chunk_rows,
+        },
+    )
+
+    chunk_log_sql = text(
+        f"""
+        INSERT INTO "{CHECKPOINT_SCHEMA}"."{CHUNK_LOG_TABLE}"
+            (batch_id, logical_name, chunk_index, chunk_rows, chunk_max_wm, status, committed_at)
+        VALUES
+            (:batch_id, :logical_name, :chunk_index, :chunk_rows, :chunk_max_wm, 'COMPLETED', CURRENT_TIMESTAMP)
+        ON CONFLICT (batch_id, logical_name, chunk_index) DO UPDATE SET
+            chunk_rows = EXCLUDED.chunk_rows,
+            chunk_max_wm = EXCLUDED.chunk_max_wm,
+            status = 'COMPLETED',
+            committed_at = CURRENT_TIMESTAMP;
+        """
+    )
+    conn.execute(
+        chunk_log_sql,
+        {
+            "batch_id": batch_id,
+            "logical_name": logical_name,
+            "chunk_index": chunk_index or 1,
+            "chunk_rows": chunk_rows,
+            "chunk_max_wm": checkpoint_val,
         },
     )
 
