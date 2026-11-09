@@ -39,7 +39,7 @@ resume_load() {
 }
 
 transform_silver() {
-    "$PYTHON" -m src.transformation.dbt_runner silver
+    "$PYTHON" -m src.transformation.dbt_runner silver "${@:2}"
 }
 
 transform_snapshot() {
@@ -47,7 +47,7 @@ transform_snapshot() {
 }
 
 transform_gold() {
-    "$PYTHON" -m src.transformation.dbt_runner gold
+    "$PYTHON" -m src.transformation.dbt_runner gold "${@:2}"
 }
 
 test_models() {
@@ -55,7 +55,7 @@ test_models() {
 }
 
 transform() {
-    "$PYTHON" -m src.transformation.dbt_runner all
+    "$PYTHON" -m src.transformation.dbt_runner all "${@:2}"
 }
 
 unit_test() {
@@ -64,7 +64,7 @@ unit_test() {
 
 pipeline() {
     extract_load
-    transform
+    transform "$@"
     echo "Toan bo Pipeline da thuc thi hoan tat!"
 }
 
@@ -97,16 +97,16 @@ case "$1" in
         resume_load
         ;;
     transform)
-        transform
+        transform "$@"
         ;;
     transform-silver)
-        transform_silver
+        transform_silver "$@"
         ;;
     snapshot)
         transform_snapshot
         ;;
     transform-gold)
-        transform_gold
+        transform_gold "$@"
         ;;
     test)
         test_models
@@ -115,7 +115,7 @@ case "$1" in
         unit_test
         ;;
     pipeline|pineline)
-        pipeline
+        pipeline "$@"
         ;;
     clean)
         clean

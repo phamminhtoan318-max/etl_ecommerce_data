@@ -181,7 +181,7 @@ def main():
         logger.info("🎉 NẠP TẦNG BRONZE THÀNH CÔNG 100%!")
 
         if "--transform" in sys.argv or "--all" in sys.argv:
-            run_dbt_all()
+            run_dbt_all(full_refresh="--full-refresh" in sys.argv)
 
     except SchemaValidationError as sve:
         total_elapsed = time.time() - pipeline_start
