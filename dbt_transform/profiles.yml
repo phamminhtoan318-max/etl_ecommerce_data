@@ -10,3 +10,5 @@ dbt_transform:
       dbname: "{{ env_var('TGT_DB_NAME', 'olist_dwh') }}"
       schema: analytics
       threads: 12
+      connect_timeout: 10
+      keepalives_idle: 60

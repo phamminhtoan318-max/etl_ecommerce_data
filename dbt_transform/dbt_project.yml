@@ -18,12 +18,19 @@ clean-targets:
 
 models:
   dbt_transform:
+    +pre-hook:
+      - "SET lock_timeout = '30s'; SET statement_timeout = '300s';"
     staging:
       +materialized: table
       +schema: silver
     marts:
       +materialized: table
       +schema: gold
+
+snapshots:
+  dbt_transform:
+    +pre-hook:
+      - "SET lock_timeout = '30s'; SET statement_timeout = '300s';"
 
 tests:
   dbt_transform:
